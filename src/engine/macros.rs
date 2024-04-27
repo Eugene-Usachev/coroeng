@@ -6,12 +6,8 @@
 #[macro_export]
 macro_rules! new_coroutine {
     ($code:block) => {
-        || {
-            if true {
-                $code
-            } else {
-                yield $crate::engine::coroutine::never();
-            }
+        #[coroutine] || {
+            $code
         }
     }
 }
@@ -24,12 +20,8 @@ macro_rules! new_coroutine {
 #[macro_export]
 macro_rules! new_coroutine_move {
     ($code:block) => {
-        move || {
-            if true {
-                $code
-            } else {
-                yield $crate::engine::coroutine::never();
-            }
+        #[coroutine] move || {
+            $code
         }
     }
 }

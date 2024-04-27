@@ -103,35 +103,15 @@ impl Scheduler {
                     }
 
                     YieldStatus::TcpWrite(stream, buf, result) => {
-                        let res = unsafe {
-                            selector.write(stream, buf.as_slice())
-                        };
-                        unsafe { *result = res; }
-                        buf_pool().put(buf);
-
-                        self.handle_coroutine_state(selector, task);
+                        let token = unsafe { selector.get_token_mut_ref(stream) };
+                        *token = Token::new_write_tcp(token.fd(), buf, task, result);
+                        selector.write(stream);
                     }
 
                     YieldStatus::TcpWriteAll(stream, buf, result) => {
-                        let mut write = 0;
-                        loop {
-                            let res = unsafe {
-                                selector.write(stream, buf.as_slice())
-                            };
-                            if res.is_ok() {
-                                write += unsafe { res.unwrap_unchecked() };
-                                if write == buf.len() {
-                                    unsafe { *result = Ok(()) };
-                                    break;
-                                }
-                            } else {
-                                unsafe { *result = Err(res.unwrap_err_unchecked()) };
-                                break;
-                            }
-                        }
-                        buf_pool().put(buf);
-
-                        self.handle_coroutine_state(selector, task);
+                        let token = unsafe { selector.get_token_mut_ref(stream) };
+                        *token = Token::new_write_all_tcp(token.fd(), buf, task, result);
+                        selector.write_all(stream);
                     }
 
                     YieldStatus::TcpClose(socket) => {
@@ -154,7 +134,7 @@ impl Scheduler {
         let mut selector = EpolledSelector::new().expect("failed to create selector");
         let selector_ref = unsafe { transmute::<&mut EpolledSelector, &'static mut EpolledSelector>(&mut selector) };
 
-        self.sched(Box::pin(|| {
+        self.sched(Box::pin(#[coroutine] || {
             let scheduler = local_scheduler();
             loop {
                 scheduler.awake_coroutines();

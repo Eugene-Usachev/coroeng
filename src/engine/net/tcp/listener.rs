@@ -19,7 +19,7 @@ use crate::{spawn_local, spawn_local_move};
 /// use crate::engine::net::tcp::Listener;
 /// use crate::engine::io::io_yield;
 ///
-/// let mut listener = io_yield!(TcpListener::new, "engine:8081".to_socket_addrs().unwrap().next().unwrap());
+/// let mut listener = io_yield!(TcpListener::new, "localhost:8081".to_socket_addrs().unwrap().next().unwrap());
 /// loop {
 ///     let stream_ = io_yield!(TcpListener::accept, &mut listener);
 ///     if stream_.is_err() {
@@ -84,7 +84,7 @@ impl TcpListener {
     /// use crate::engine::net::tcp::Listener;
     /// use crate::engine::io::io_yield;
     ///
-    /// let mut listener = io_yield!(TcpListener::new, "engine:8081".to_socket_addrs().unwrap().next().unwrap());
+    /// let mut listener = io_yield!(TcpListener::new, "localhost:8081".to_socket_addrs().unwrap().next().unwrap());
     /// loop {
     ///     let stream_ = io_yield!(TcpListener::accept, &mut listener);
     ///     if stream_.is_err() {

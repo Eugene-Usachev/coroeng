@@ -1,6 +1,6 @@
 use std::cell::UnsafeCell;
 use std::intrinsics::{likely, unlikely};
-use std::mem;
+use std::{mem, ptr};
 use std::mem::MaybeUninit;
 
 #[derive(Debug)]
@@ -67,6 +67,23 @@ impl Buffer {
     pub fn clear(&mut self) {
         self.offset = 0;
     }
+
+    fn release(self) {
+        buf_pool().put(self);
+    }
+}
+
+impl Default for Buffer {
+    fn default() -> Self {
+        Buffer::new(0)
+    }
+}
+
+impl Drop for Buffer {
+    fn drop(&mut self) {
+        let buf = unsafe { mem::take(self) };
+        buf.release();
+    }
 }
 
 thread_local! {
@@ -117,7 +134,7 @@ impl BufPool {
         unsafe { self.pool.pop().unwrap_unchecked() }
     }
 
-    pub fn put(&mut self, mut buf: Buffer) {
+    fn put(&mut self, mut buf: Buffer) {
         if likely(buf.from_pool) {
             buf.clear();
             self.pool.push(buf);
