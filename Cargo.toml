@@ -1,0 +1,15 @@
+[package]
+name = "engine"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+crossbeam = "0.8.4"
+core_affinity = "0.8.1"
+crossbeam-utils = "0.8.19"
+nix = { version = "0.28.0", features = ["net", "event"] }
+libc = "0.2.153"
+socket2 = "0.5.6"
+cfg-if = "1.0.0"
+slab = "0.4.9"
+io-uring = "0.6.3"
