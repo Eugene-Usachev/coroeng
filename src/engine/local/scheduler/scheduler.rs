@@ -85,7 +85,7 @@ impl Scheduler {
                     }
 
                     YieldStatus::TcpAccept(is_registered, listener, result) => {
-                        let token = unsafe { selector.get_token_mut_ref(listener) };
+                        let token = selector.get_token_mut_ref(listener);
                         *token = Token::new_accept_tcp(token.fd(), task, result);
                         let fd = token.fd();
                         if !is_registered {
@@ -94,7 +94,7 @@ impl Scheduler {
                     }
 
                     YieldStatus::TcpRead(is_registered, stream, result) => {
-                        let token = unsafe { selector.get_token_mut_ref(stream) };
+                        let token =  selector.get_token_mut_ref(stream);
                         *token = Token::new_poll_tcp(token.fd(), task, result);
                         let fd = token.fd();
                         if !is_registered {
@@ -103,13 +103,13 @@ impl Scheduler {
                     }
 
                     YieldStatus::TcpWrite(stream, buf, result) => {
-                        let token = unsafe { selector.get_token_mut_ref(stream) };
+                        let token = selector.get_token_mut_ref(stream);
                         *token = Token::new_write_tcp(token.fd(), buf, task, result);
                         selector.write(stream);
                     }
 
                     YieldStatus::TcpWriteAll(stream, buf, result) => {
-                        let token = unsafe { selector.get_token_mut_ref(stream) };
+                        let token = selector.get_token_mut_ref(stream);
                         *token = Token::new_write_all_tcp(token.fd(), buf, task, result);
                         selector.write_all(stream);
                     }

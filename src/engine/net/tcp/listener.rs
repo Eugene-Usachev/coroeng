@@ -113,7 +113,7 @@ impl TcpListener {
         YieldStatus::TcpAccept(is_registered, self.token_id, res)
     }
 
-    /// Closes the [`TcpListener`] by token_id. After closing, the [`TcpListener`] can no longer be used.
+    /// Closes the [`TcpListener`] by token_id. After closing, the [`TcpListener`] can not be used.
     fn close(token_id: usize) -> YieldStatus {
         YieldStatus::TcpClose(token_id)
     }

@@ -1,3 +1,5 @@
+//! Todo: remove. Is it needed?
+
 use std::{io, mem};
 use std::ops::Coroutine;
 use std::os::fd::{BorrowedFd, RawFd};
