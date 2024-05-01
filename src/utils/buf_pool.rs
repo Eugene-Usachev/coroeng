@@ -35,6 +35,10 @@ impl Buffer {
         self.offset
     }
 
+    pub fn cap(&self) -> usize {
+        self.slice.len()
+    }
+
     // TODO: need test
     pub fn append(&mut self, buf: &[u8]) {
         let len = buf.len();

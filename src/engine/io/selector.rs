@@ -2,7 +2,9 @@
 //!
 //! Selector is a trait for working with systems selectors like epoll, kqueue, io_uring etc.
 
-use std::os::fd::RawFd;
+// TODO: here in docs we use "the selector" instead of [`Selector`] and "register with the selector" instead of something better.
+
+use crate::engine::io::sys::unix::{EpolledSelector, IoUringSelector};
 use crate::engine::io::Token;
 use crate::engine::local::Scheduler;
 // needed for docs.
@@ -31,6 +33,10 @@ use crate::engine::io::token::{EmptyToken, WriteTcpToken, WriteAllTcpToken};
 ///
 /// * For replacing the token, uses [`Selector::get_token_mut_ref`].
 pub(crate) trait Selector {
+    /// Returns true, if [`Selector`] needs to have the token re-registered fd every time.
+    /// [`EpolledSelector`] returns false.
+    /// [`IoUringSelector`] returns true.
+    fn need_reregister(&self) -> bool;
     /// Insert token into the selector, returns the token identifier.
     fn insert_token(&mut self, token: Token) -> usize;
     /// Returns mut reference to the token by identifier. Uses for replacing the token.
@@ -56,7 +62,7 @@ pub(crate) trait Selector {
     /// So, you should call this method, when no ready coroutines.
     fn poll(&mut self, scheduler: &mut Scheduler) -> Result<(), ()>;
     /// Registers the token with the selector.
-    fn register(&mut self, fd: RawFd, token_id: usize);
+    fn register(&mut self, token_id: usize);
     /// Deregisters the token with the selector by the token identifier.
     ///
     /// # Panics
@@ -97,5 +103,5 @@ pub(crate) trait Selector {
     /// This method can lead to one or more syscalls.
     fn write_all(&mut self, token_id: usize);
     /// TODO: docs
-    fn close_connection(token: Token);
+    fn close_connection(&mut self, token_id: usize);
 }

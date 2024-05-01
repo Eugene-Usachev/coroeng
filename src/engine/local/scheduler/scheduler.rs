@@ -10,7 +10,7 @@ use std::time::Instant;
 use core_affinity::CoreId;
 use crate::engine::coroutine::coroutine::{CoroutineImpl, YieldStatus};
 use crate::engine::io::sys::unix::epoll::net;
-use crate::engine::io::sys::unix::EpolledSelector;
+use crate::engine::io::sys::unix::{EpolledSelector, IoUringSelector};
 use crate::engine::io::{Selector, Token};
 use crate::engine::sleep::sleep::SleepingCoroutine;
 use crate::utils::buf_pool;
@@ -87,18 +87,16 @@ impl Scheduler {
                     YieldStatus::TcpAccept(is_registered, listener, result) => {
                         let token = selector.get_token_mut_ref(listener);
                         *token = Token::new_accept_tcp(token.fd(), task, result);
-                        let fd = token.fd();
-                        if !is_registered {
-                            selector.register(fd, listener);
+                        if selector.need_reregister() || !is_registered {
+                            selector.register(listener);
                         }
                     }
 
                     YieldStatus::TcpRead(is_registered, stream, result) => {
                         let token =  selector.get_token_mut_ref(stream);
                         *token = Token::new_poll_tcp(token.fd(), task, result);
-                        let fd = token.fd();
-                        if !is_registered {
-                            selector.register(fd, stream);
+                        if selector.need_reregister() || !is_registered {
+                            selector.register(stream);
                         }
                     }
 
@@ -115,9 +113,9 @@ impl Scheduler {
                     }
 
                     YieldStatus::TcpClose(socket) => {
-                        let token = selector.deregister(socket);
-                        S::close_connection(token);
-                        self.handle_coroutine_state(selector, task);
+                        let token = selector.get_token_mut_ref(socket);
+                        *token = Token::new_close_tcp(token.fd(), task);
+                        selector.close_connection(socket);
                     }
 
                     YieldStatus::Never => {
@@ -132,7 +130,9 @@ impl Scheduler {
     pub fn run<Co: Coroutine<Yield = YieldStatus, Return=()> + 'static>(&mut self, main_func: Pin<Box<Co>>) {
         self.task_queue.push_back(main_func);
         let mut selector = EpolledSelector::new().expect("failed to create selector");
+        //let mut selector = IoUringSelector::new();
         let selector_ref = unsafe { transmute::<&mut EpolledSelector, &'static mut EpolledSelector>(&mut selector) };
+        //let selector_ref = unsafe { transmute::<&mut IoUringSelector, &'static mut IoUringSelector>(&mut selector) };
 
         self.sched(Box::pin(#[coroutine] || {
             let scheduler = local_scheduler();
