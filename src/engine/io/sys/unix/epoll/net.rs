@@ -12,7 +12,7 @@ const OPTVAL: bool = true;
 
 /// Returns [`OwnedFd`] for the configured tcp listener.
 #[inline]
-pub(crate) fn get_listener_fd(socket_addr: SocketAddr) -> OwnedFd {
+pub(crate) fn get_tcp_listener_fd(socket_addr: SocketAddr) -> OwnedFd {
     // TODO v6
     let octets;
     match socket_addr.ip() {

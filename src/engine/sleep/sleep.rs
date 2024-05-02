@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
-use crate::engine::coroutine::coroutine::{CoroutineImpl, YieldStatus};
+use crate::engine::coroutine::coroutine::{CoroutineImpl};
+use crate::engine::coroutine::YieldStatus;
 
 pub(crate) struct SleepingCoroutine {
     pub(crate) execution_time: Instant,
@@ -16,7 +17,7 @@ impl SleepingCoroutine {
 }
 
 pub fn sleep(dur: Duration) -> YieldStatus {
-    YieldStatus::Sleep(dur)
+    YieldStatus::sleep(dur)
 }
 
 unsafe impl Send for SleepingCoroutine {}

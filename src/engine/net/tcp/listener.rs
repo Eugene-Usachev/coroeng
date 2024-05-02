@@ -1,10 +1,10 @@
 use std::io::Error;
-use std::net::SocketAddr;
+use std::net::{SocketAddr};
 use std::os::fd::{IntoRawFd, RawFd};
-use crate::engine::coroutine::coroutine::YieldStatus;
-use crate::engine::io::sys::unix::epoll::net::get_listener_fd;
+use crate::engine::coroutine::YieldStatus;
+use crate::engine::io::sys::unix::epoll::net::get_tcp_listener_fd;
 use crate::engine::net::tcp::TcpStream;
-use crate::{spawn_local, spawn_local_move};
+use crate::{spawn_local_move};
 
 /// A TCP socket server, listening for connections.
 ///
@@ -48,8 +48,16 @@ pub struct TcpListener {
 }
 
 impl TcpListener {
+    /// Returns the token_id of the [`TcpListener`].
+    ///
+    /// Uses for low-level work with the scheduler. If you don't know what it is, don't use it.
+    pub fn token_id(&self) -> usize {
+        self.token_id
+    }
+
+    /// Returns the fd for the [`TcpListener`].
     pub(crate) fn get_fd(addr: SocketAddr) -> RawFd {
-        get_listener_fd(addr).into_raw_fd()
+        get_tcp_listener_fd(addr).into_raw_fd()
     }
 
     /// Creates a new TcpListener.
@@ -68,7 +76,7 @@ impl TcpListener {
     /// let mut listener = io_yield!(TcpListener::new, "localhost:8081".to_socket_addrs().unwrap().next().unwrap());
     /// ```
     pub fn new(addr: SocketAddr, res: *mut TcpListener) -> YieldStatus {
-        YieldStatus::NewTcpListener(addr, res)
+        YieldStatus::new_tcp_listener(addr, res)
     }
 
     /// Accepts a new TcpStream.
@@ -110,12 +118,12 @@ impl TcpListener {
         if !is_registered {
             self.is_registered = true;
         }
-        YieldStatus::TcpAccept(is_registered, self.token_id, res)
+        YieldStatus::tcp_accept(is_registered, self.token_id, res)
     }
 
     /// Closes the [`TcpListener`] by token_id. After closing, the [`TcpListener`] can not be used.
     fn close(token_id: usize) -> YieldStatus {
-        YieldStatus::TcpClose(token_id)
+        YieldStatus::tcp_close(token_id)
     }
 }
 

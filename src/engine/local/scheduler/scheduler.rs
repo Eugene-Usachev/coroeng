@@ -4,16 +4,15 @@ use std::intrinsics::unlikely;
 use std::mem;
 use std::mem::{MaybeUninit, transmute};
 use std::ops::{Coroutine, CoroutineState};
-use std::os::fd::BorrowedFd;
 use std::pin::Pin;
 use std::time::Instant;
 use core_affinity::CoreId;
-use crate::engine::coroutine::coroutine::{CoroutineImpl, YieldStatus};
-use crate::engine::io::sys::unix::epoll::net;
-use crate::engine::io::sys::unix::{EpolledSelector, IoUringSelector};
+use crate::engine::coroutine::coroutine::{CoroutineImpl};
+use crate::engine::coroutine::YieldStatus;
+use crate::engine::io::sys::unix::{EpolledSelector,};
 use crate::engine::io::{Selector, Token};
 use crate::engine::sleep::sleep::SleepingCoroutine;
-use crate::utils::buf_pool;
+use crate::utils::hide_mut_unsafe;
 
 thread_local! {
     pub static LOCAL_SCHEDULER: UnsafeCell<MaybeUninit<Scheduler>> = UnsafeCell::new(MaybeUninit::zeroed());
@@ -58,7 +57,7 @@ impl Scheduler {
 
     #[inline(always)]
     pub(crate) fn handle_coroutine_state<S: Selector>(&mut self, selector: &mut S, mut task: CoroutineImpl) {
-        let res = task.as_mut().resume(());
+        let res: CoroutineState<YieldStatus, ()> = task.as_mut().resume(());
         match res {
             CoroutineState::Yielded(status) => {
                 match status {
@@ -71,55 +70,51 @@ impl Scheduler {
                         self.task_queue.push_back(task);
                     }
 
-                    YieldStatus::NewTcpListener(addr, result) => {
-                        let fd = crate::engine::net::tcp::TcpListener::get_fd(addr);
+                    YieldStatus::NewTcpListener(status) => {
+                        let fd = crate::engine::net::tcp::TcpListener::get_fd(status.address);
                         let token_id = selector.insert_token(Token::new_empty(fd));
                         let listener = crate::engine::net::tcp::TcpListener {
                             token_id,
                             fd,
                             is_registered: false
                         };
-                        unsafe {*result = listener; }
+                        unsafe {*status.listener_ptr = listener; }
 
                         self.handle_coroutine_state(selector, task);
                     }
 
-                    YieldStatus::TcpAccept(is_registered, listener, result) => {
-                        let token = selector.get_token_mut_ref(listener);
-                        *token = Token::new_accept_tcp(token.fd(), task, result);
-                        if selector.need_reregister() || !is_registered {
-                            selector.register(listener);
+                    YieldStatus::TcpAccept(status) => {
+                        let token = selector.get_token_mut_ref(status.token_id);
+                        *token = Token::new_accept_tcp(token.fd(), task, status.result_ptr);
+                        if selector.need_reregister() || !status.is_registered {
+                            selector.register(status.token_id);
                         }
                     }
 
-                    YieldStatus::TcpRead(is_registered, stream, result) => {
-                        let token =  selector.get_token_mut_ref(stream);
-                        *token = Token::new_poll_tcp(token.fd(), task, result);
-                        if selector.need_reregister() || !is_registered {
-                            selector.register(stream);
+                    YieldStatus::TcpRead(status) => {
+                        let token =  selector.get_token_mut_ref(status.token_id);
+                        *token = Token::new_poll_tcp(token.fd(), task, status.result_ptr);
+                        if selector.need_reregister() || !status.is_registered {
+                            selector.register(status.token_id);
                         }
                     }
 
-                    YieldStatus::TcpWrite(stream, buf, result) => {
-                        let token = selector.get_token_mut_ref(stream);
-                        *token = Token::new_write_tcp(token.fd(), buf, task, result);
-                        selector.write(stream);
+                    YieldStatus::TcpWrite(status) => {
+                        let token = selector.get_token_mut_ref(status.token_id);
+                        *token = Token::new_write_tcp(token.fd(), status.buffer, task, status.result_ptr);
+                        selector.write(status.token_id);
                     }
 
-                    YieldStatus::TcpWriteAll(stream, buf, result) => {
-                        let token = selector.get_token_mut_ref(stream);
-                        *token = Token::new_write_all_tcp(token.fd(), buf, task, result);
-                        selector.write_all(stream);
+                    YieldStatus::TcpWriteAll(status) => {
+                        let token = selector.get_token_mut_ref(status.token_id);
+                        *token = Token::new_write_all_tcp(token.fd(), status.buffer, task, status.result_ptr);
+                        selector.write_all(status.token_id);
                     }
 
-                    YieldStatus::TcpClose(socket) => {
-                        let token = selector.get_token_mut_ref(socket);
+                    YieldStatus::TcpClose(status) => {
+                        let token = selector.get_token_mut_ref(status.token_id);
                         *token = Token::new_close_tcp(token.fd(), task);
-                        selector.close_connection(socket);
-                    }
-
-                    YieldStatus::Never => {
-                        unreachable!("never yield in scheduler")
+                        selector.close_connection(status.token_id);
                     }
                 }
             }

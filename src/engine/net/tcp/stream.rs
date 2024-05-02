@@ -1,6 +1,6 @@
 use std::io::Error;
-use crate::engine::coroutine::coroutine::YieldStatus;
-use crate::{spawn_local, spawn_local_move};
+use crate::engine::coroutine::YieldStatus;
+use crate::{spawn_local_move};
 use crate::utils::Buffer;
 
 pub struct TcpStream {
@@ -48,19 +48,19 @@ impl TcpStream {
         if !is_registered {
             self.set_registered(true);
         }
-        YieldStatus::TcpRead(is_registered, self.token_id(), res)
+        YieldStatus::tcp_read(is_registered, self.token_id(), res)
     }
 
     pub fn write(&self, buf: Buffer, res: *mut Result<usize, Error>) -> YieldStatus {
-        YieldStatus::TcpWrite(self.token_id(), buf, res)
+        YieldStatus::tcp_write(self.token_id(), buf, res)
     }
 
     pub fn write_all(&self, buf: Buffer, res: *mut Result<(), Error>) -> YieldStatus {
-        YieldStatus::TcpWriteAll(self.token_id(), buf, res)
+        YieldStatus::tcp_write_all(self.token_id(), buf, res)
     }
 
     fn close(token_id: usize) -> YieldStatus {
-        YieldStatus::TcpClose(token_id)
+        YieldStatus::tcp_close(token_id)
     }
 }
 
