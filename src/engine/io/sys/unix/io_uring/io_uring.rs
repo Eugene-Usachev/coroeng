@@ -5,7 +5,7 @@ use std::cell::UnsafeCell;
 use std::os::fd::RawFd;
 use io_uring::{cqueue, IoUring, opcode, squeue, SubmissionQueue, CompletionQueue, Submitter, types};
 use io_uring::types::{SubmitArgs, Timespec};
-use crate::engine::io::{Selector, Token};
+use crate::engine::io::{Selector, State};
 use crate::engine::local::Scheduler;
 use crate::engine::net::TcpStream;
 use crate::{utils, write_ok};
@@ -14,13 +14,13 @@ use crate::utils::{hide_mut_unsafe, Ptr};
 pub(crate) struct IoUringSelector {
     timeout: SubmitArgs<'static, 'static>,
     /// # Why we need some cell?
-    /// 
-    /// We can't rewrite engine ([`Selector`] trait) to use only `tokens` field.
-    /// And we can't use `&mut self` in [`Scheduler::handle_coroutine_state`] function, because we are borrowing the `ring` before [`Scheduler::handle_coroutine_state`].
+    ///
+    /// We can't rewrite engine ([`Selector`] trait) to use separately `ring` field and other fields in different methods.
+    /// For example, we can't use `&mut self` in [`Scheduler::handle_coroutine_state`] function, because we are borrowing the `ring` before [`Scheduler::handle_coroutine_state`].
     /// So we need some cell not to destroy the abstraction.
-    /// 
+    ///
     /// # Why we use UnsafeCell?
-    /// 
+    ///
     /// Because we can guarantee that:
     /// * only one thread can borrow the [`IoUringSelector`] at the same time
     /// * only in the [`poll`] method we borrow the `ring` field for [`CompletionQueue`] and [`SubmissionQueue`],
@@ -138,75 +138,75 @@ impl Selector for IoUringSelector {
 
         for cqe in &mut cq {
             let ret = cqe.result();
-            let token_ptr = Ptr::from(cqe.user_data() as usize);
-            let token = unsafe { token_ptr.read() };
+            let state_ptr = Ptr::from(cqe.user_data() as usize);
+            let state = unsafe { state_ptr.read() };
 
-            println!("Handle token: {:?} with ret: {ret}", unsafe { token_ptr.as_ref() });
+            println!("Handle state: {:?} with ret: {ret}", unsafe { state_ptr.as_ref() });
 
-            match token {
-                Token::Empty(_) => {}
+            match state {
+                State::Empty(_) => {}
 
-                Token::AcceptTcp(token) => {
-                    handle_ret!(ret, token.result);
+                State::AcceptTcp(state) => {
+                    handle_ret!(ret, state.result);
 
                     let incoming_fd = ret;
-                    write_ok!(token.result, TcpStream::new(incoming_fd));
+                    write_ok!(state.result, TcpStream::new(incoming_fd));
 
-                    scheduler.handle_coroutine_state(self, token.coroutine);
+                    scheduler.handle_coroutine_state(self, state.coroutine);
                 }
 
-                Token::PollTcp(token) => {
-                    handle_ret!(ret, token.result);
+                State::PollTcp(state) => {
+                    handle_ret!(ret, state.result);
 
                     println!("poll ret: {}", ret);
 
                     let buffer = utils::buffer();
-                    unsafe { token_ptr.write(Token::new_read_tcp(token.fd, buffer, token.coroutine, token.result)) };
-                    self.register(token_ptr);
+                    unsafe { state_ptr.write(State::new_read_tcp(state.fd, buffer, state.coroutine, state.result)) };
+                    self.register(state_ptr);
                 }
 
-                Token::ReadTcp(token) => {
+                State::ReadTcp(state) => {
                     println!("read ret: {}", ret);
 
-                    handle_ret!(ret, token.result);
+                    handle_ret!(ret, state.result);
 
-                    write_ok!(token.result, mem::transmute(token.buffer.as_slice()));
+                    write_ok!(state.result, mem::transmute(state.buffer.as_slice()));
 
-                    scheduler.handle_coroutine_state(self, token.coroutine);
+                    scheduler.handle_coroutine_state(self, state.coroutine);
                 }
 
-                Token::WriteTcp(token) => {
-                    handle_ret!(ret, token.result);
+                State::WriteTcp(state) => {
+                    handle_ret!(ret, state.result);
 
-                    write_ok!(token.result, ret as usize);
+                    write_ok!(state.result, ret as usize);
 
-                    scheduler.handle_coroutine_state(self, token.coroutine)
+                    scheduler.handle_coroutine_state(self, state.coroutine)
                 }
 
-                Token::WriteAllTcp(mut token) => {
-                    handle_ret!(ret, token.result);
+                State::WriteAllTcp(mut state) => {
+                    handle_ret!(ret, state.result);
                     println!("write all ret: {}", ret);
                     let was_written = ret as usize;
-                    if token.bytes_written + was_written < token.buffer.len() {
-                        token.bytes_written += was_written;
+                    if state.bytes_written + was_written < state.buffer.len() {
+                        state.bytes_written += was_written;
                         let sqe = opcode::Write::new(
-                            types::Fd(token.fd),
-                            unsafe { token.buffer.as_ptr().add(token.bytes_written) },
-                            (token.buffer.len() - token.bytes_written) as u32
-                        ).build().user_data(token_ptr.as_u64());
-                        unsafe { token_ptr.write(Token::WriteAllTcp(token)) };
+                            types::Fd(state.fd),
+                            unsafe { state.buffer.as_ptr().add(state.bytes_written) },
+                            (state.buffer.len() - state.bytes_written) as u32
+                        ).build().user_data(state_ptr.as_u64());
+                        unsafe { state_ptr.write(State::WriteAllTcp(state)) };
                         self.push_sqe(sqe);
                         continue;
                     }
 
-                    write_ok!(token.result, ());
+                    write_ok!(state.result, ());
 
-                    scheduler.handle_coroutine_state(self, token.coroutine)
+                    scheduler.handle_coroutine_state(self, state.coroutine)
                 }
 
-                Token::CloseTcp(token) => {
-                    self.deregister(token.fd);
-                    scheduler.handle_coroutine_state(self, token.coroutine)
+                State::CloseTcp(state) => {
+                    self.deregister(state.fd);
+                    scheduler.handle_coroutine_state(self, state.coroutine)
                 }
             }
         }
@@ -214,48 +214,48 @@ impl Selector for IoUringSelector {
         Ok(())
     }
 
-    fn register(&mut self, token_ptr: Ptr<Token>) {
-        let token = unsafe { token_ptr.as_mut() };
-        let mut sqe = match token {
-            Token::Empty(_) => {
+    fn register(&mut self, state_ptr: Ptr<State>) {
+        let state = unsafe { state_ptr.as_mut() };
+        let mut sqe = match state {
+            State::Empty(_) => {
                 return;
             }
 
-            Token::AcceptTcp(token) => {
-                opcode::Accept::new(types::Fd(token.fd), ptr::null_mut(), ptr::null_mut())
+            State::AcceptTcp(state) => {
+                opcode::Accept::new(types::Fd(state.fd), ptr::null_mut(), ptr::null_mut())
                     .build()
             }
 
-            Token::PollTcp(token) => {
-                opcode::PollAdd::new(types::Fd(token.fd), libc::POLLIN as _)
+            State::PollTcp(state) => {
+                opcode::PollAdd::new(types::Fd(state.fd), libc::POLLIN as _)
                     .build()
             }
 
-            Token::ReadTcp(token) => {
-                opcode::Recv::new(types::Fd(token.fd), token.buffer.as_mut_ptr(), token.buffer.cap() as u32)
+            State::ReadTcp(state) => {
+                opcode::Recv::new(types::Fd(state.fd), state.buffer.as_mut_ptr(), state.buffer.cap() as u32)
                     .build()
             }
 
-            Token::WriteTcp(token) => {
-                opcode::SendZc::new(types::Fd(token.fd), token.buffer.as_ptr(), token.buffer.len() as u32)
+            State::WriteTcp(state) => {
+                opcode::SendZc::new(types::Fd(state.fd), state.buffer.as_ptr(), state.buffer.len() as u32)
                     .build()
             }
 
-            Token::WriteAllTcp(token) => {
-                // TODO: maybe we need to use token.buffer.as_ptr().add(token.bytes_written) and use register in poll?
-                opcode::SendZc::new(types::Fd(token.fd), token.buffer.as_ptr(), token.buffer.len() as u32)
+            State::WriteAllTcp(state) => {
+                // TODO: maybe we need to use state.buffer.as_ptr().add(state.bytes_written) and use register in poll?
+                opcode::SendZc::new(types::Fd(state.fd), state.buffer.as_ptr(), state.buffer.len() as u32)
                     .build()
             }
 
-            Token::CloseTcp(token) => {
-                opcode::Close::new(types::Fd(token.fd))
+            State::CloseTcp(state) => {
+                opcode::Close::new(types::Fd(state.fd))
                     .build()
             }
         };
 
-        sqe = sqe.user_data(token_ptr.as_u64());
+        sqe = sqe.user_data(state_ptr.as_u64());
 
-        //println!("register sqe: {:?} for token id: {token_id}, sqe: {sqe:?}", token);
+        //println!("register sqe: {:?} for state id: {state_id}, sqe: {sqe:?}", state);
         self.push_sqe(sqe);
     }
 
@@ -263,17 +263,17 @@ impl Selector for IoUringSelector {
     fn deregister(&mut self, fd: RawFd) {}
 
     #[inline(always)]
-    fn write(&mut self, token_ref: Ptr<Token>) {
-        self.register(token_ref);
+    fn write(&mut self, state_ref: Ptr<State>) {
+        self.register(state_ref);
     }
 
     #[inline(always)]
-    fn write_all(&mut self, token_ref: Ptr<Token>) {
-        self.register(token_ref);
+    fn write_all(&mut self, state_ref: Ptr<State>) {
+        self.register(state_ref);
     }
 
     #[inline(always)]
-    fn close_connection(&mut self, token_ref: Ptr<Token>) {
-        self.register(token_ref);
+    fn close_connection(&mut self, state_ref: Ptr<State>) {
+        self.register(state_ref);
     }
 }

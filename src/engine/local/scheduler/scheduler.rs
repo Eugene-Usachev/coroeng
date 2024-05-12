@@ -11,7 +11,7 @@ use core_affinity::CoreId;
 use crate::engine::coroutine::coroutine::{CoroutineImpl};
 use crate::engine::coroutine::YieldStatus;
 use crate::engine::io::sys::unix::{EpolledSelector,};
-use crate::engine::io::{Selector, Token};
+use crate::engine::io::{Selector, State};
 use crate::engine::net::TcpListener;
 use crate::engine::sleep::sleep::SleepingCoroutine;
 use crate::utils::{hide_mut_unsafe, Ptr};
@@ -80,43 +80,43 @@ impl Scheduler {
                     }
 
                     YieldStatus::TcpAccept(status) => {
-                        let mut token_ptr = status.token_ref;
-                        let token_ref = unsafe { token_ptr.as_ref() };
-                        unsafe { token_ptr.write(Token::new_accept_tcp(token_ref.fd(), task, status.result_ptr)) };
+                        let mut state_ptr = status.state_ref;
+                        let state_ref = unsafe { state_ptr.as_ref() };
+                        unsafe { state_ptr.write(State::new_accept_tcp(state_ref.fd(), task, status.result_ptr)) };
                         if selector.need_reregister() || !status.is_registered {
-                            selector.register(token_ptr);
+                            selector.register(state_ptr);
                         }
                     }
 
                     YieldStatus::TcpRead(status) => {
-                        let mut token_ptr = status.token_ref;
-                        let token_ref = unsafe { token_ptr.as_ref() };
-                        unsafe { token_ptr.write(Token::new_poll_tcp(token_ref.fd(), task, status.result_ptr)) };
+                        let mut state_ptr = status.state_ref;
+                        let state_ref = unsafe { state_ptr.as_ref() };
+                        unsafe { state_ptr.write(State::new_poll_tcp(state_ref.fd(), task, status.result_ptr)) };
                         if selector.need_reregister() || !status.is_registered {
-                            selector.register(token_ptr);
+                            selector.register(state_ptr);
                         }
                     }
 
                     YieldStatus::TcpWrite(status) => {
-                        let mut token_ptr = status.token_ref;
-                        let token_ref = unsafe { token_ptr.as_ref() };
-                        let fd = token_ref.fd();
-                        unsafe { token_ptr.write(Token::new_write_tcp(fd, status.buffer, task, status.result_ptr)) };
-                        selector.write(token_ptr);
+                        let mut state_ptr = status.state_ref;
+                        let state_ref = unsafe { state_ptr.as_ref() };
+                        let fd = state_ref.fd();
+                        unsafe { state_ptr.write(State::new_write_tcp(fd, status.buffer, task, status.result_ptr)) };
+                        selector.write(state_ptr);
                     }
 
                     YieldStatus::TcpWriteAll(status) => {
-                        let mut token_ptr = status.token_ref;
-                        let token_ref = unsafe { token_ptr.as_ref() };
-                        unsafe { token_ptr.write(Token::new_write_all_tcp(token_ref.fd(), status.buffer, task, status.result_ptr)) };
-                        selector.write_all(token_ptr);
+                        let mut state_ptr = status.state_ref;
+                        let state_ref = unsafe { state_ptr.as_ref() };
+                        unsafe { state_ptr.write(State::new_write_all_tcp(state_ref.fd(), status.buffer, task, status.result_ptr)) };
+                        selector.write_all(state_ptr);
                     }
 
                     YieldStatus::TcpClose(status) => {
-                        let mut token_ptr = status.token_ptr;
-                        let token_ref = unsafe { token_ptr.as_mut() };
-                        unsafe { token_ptr.write(Token::new_close_tcp(token_ref.fd(), task)) };
-                        selector.close_connection(token_ptr);
+                        let mut state_ptr = status.state_ptr;
+                        let state_ref = unsafe { state_ptr.as_mut() };
+                        unsafe { state_ptr.write(State::new_close_tcp(state_ref.fd(), task)) };
+                        selector.close_connection(state_ptr);
                         //self.handle_coroutine_state(selector, task);
                     }
                 }
