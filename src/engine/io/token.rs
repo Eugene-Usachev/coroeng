@@ -48,6 +48,8 @@ pub(crate) struct CloseTcpToken {
     pub(crate) coroutine: CoroutineImpl
 }
 
+
+// TODO remove Box, because we use Ptr
 /// # Why using [`Box`]?
 ///
 /// Typically, most tokens are [`PollTcpToken`], which weighs 32 bytes (40 including the enum itself).
@@ -83,28 +85,34 @@ impl Token {
         Token::Empty(EmptyToken { fd })
     }
 
+    #[inline(always)]
     pub(crate) fn new_accept_tcp(listener: RawFd, coroutine: CoroutineImpl, result: *mut Result<TcpStream, Error>) -> Self {
         Token::AcceptTcp(Box::new(AcceptTcpToken { fd: listener, coroutine, result }))
     }
 
+    #[inline(always)]
     pub(crate) fn new_poll_tcp(stream: RawFd, coroutine: CoroutineImpl, result: *mut Result<&'_ [u8], Error>) -> Self {
         let result = unsafe { std::mem::transmute(result) };
         Token::PollTcp(Box::new(PollTcpToken { fd: stream, coroutine, result }))
     }
 
+    #[inline(always)]
     pub(crate) fn new_read_tcp(stream: RawFd, buf: Buffer, coroutine: CoroutineImpl, result: *mut Result<&'_ [u8], Error>) -> Self {
         let result = unsafe { std::mem::transmute(result) };
         Token::ReadTcp(Box::new(ReadTcpToken { fd: stream, buffer: buf, coroutine, result }))
     }
 
+    #[inline(always)]
     pub(crate) fn new_write_tcp(stream: RawFd, buf: Buffer, coroutine: CoroutineImpl, result: *mut Result<usize, Error>) -> Self {
         Token::WriteTcp(Box::new(WriteTcpToken { fd: stream, buffer: buf, coroutine, result }))
     }
 
+    #[inline(always)]
     pub(crate) fn new_write_all_tcp(stream: RawFd, buf: Buffer, coroutine: CoroutineImpl, result: *mut Result<(), Error>) -> Self {
         Token::WriteAllTcp(Box::new(WriteAllTcpToken { fd: stream, buffer: buf, coroutine, bytes_written: 0, result }))
     }
 
+    #[inline(always)]
     pub(crate) fn new_close_tcp(stream: RawFd, coroutine: CoroutineImpl) -> Self {
         Token::CloseTcp(Box::new(CloseTcpToken { fd: stream, coroutine }))
     }

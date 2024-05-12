@@ -1,18 +1,20 @@
 use std::cell::UnsafeCell;
 use std::collections::VecDeque;
-use std::intrinsics::unlikely;
+use std::intrinsics::{size_of_val, unlikely};
 use std::mem;
 use std::mem::{MaybeUninit, transmute};
 use std::ops::{Coroutine, CoroutineState};
 use std::pin::Pin;
+use std::ptr::NonNull;
 use std::time::Instant;
 use core_affinity::CoreId;
 use crate::engine::coroutine::coroutine::{CoroutineImpl};
 use crate::engine::coroutine::YieldStatus;
 use crate::engine::io::sys::unix::{EpolledSelector,};
 use crate::engine::io::{Selector, Token};
+use crate::engine::net::TcpListener;
 use crate::engine::sleep::sleep::SleepingCoroutine;
-use crate::utils::hide_mut_unsafe;
+use crate::utils::{hide_mut_unsafe, Ptr};
 
 thread_local! {
     pub static LOCAL_SCHEDULER: UnsafeCell<MaybeUninit<Scheduler>> = UnsafeCell::new(MaybeUninit::zeroed());
@@ -71,50 +73,51 @@ impl Scheduler {
                     }
 
                     YieldStatus::NewTcpListener(status) => {
-                        let fd = crate::engine::net::tcp::TcpListener::get_fd(status.address);
-                        let token_id = selector.insert_token(Token::new_empty(fd));
-                        let listener = crate::engine::net::tcp::TcpListener {
-                            token_id,
-                            fd,
-                            is_registered: false
-                        };
-                        unsafe {*status.listener_ptr = listener; }
+                        let fd = TcpListener::get_fd(status.address);
+                        unsafe { status.listener_ptr.write(TcpListener::from_fd(fd)); }
 
                         self.handle_coroutine_state(selector, task);
                     }
 
                     YieldStatus::TcpAccept(status) => {
-                        let token = selector.get_token_mut_ref(status.token_id);
-                        *token = Token::new_accept_tcp(token.fd(), task, status.result_ptr);
+                        let mut token_ptr = status.token_ref;
+                        let token_ref = unsafe { token_ptr.as_ref() };
+                        unsafe { token_ptr.write(Token::new_accept_tcp(token_ref.fd(), task, status.result_ptr)) };
                         if selector.need_reregister() || !status.is_registered {
-                            selector.register(status.token_id);
+                            selector.register(token_ptr);
                         }
                     }
 
                     YieldStatus::TcpRead(status) => {
-                        let token =  selector.get_token_mut_ref(status.token_id);
-                        *token = Token::new_poll_tcp(token.fd(), task, status.result_ptr);
+                        let mut token_ptr = status.token_ref;
+                        let token_ref = unsafe { token_ptr.as_ref() };
+                        unsafe { token_ptr.write(Token::new_poll_tcp(token_ref.fd(), task, status.result_ptr)) };
                         if selector.need_reregister() || !status.is_registered {
-                            selector.register(status.token_id);
+                            selector.register(token_ptr);
                         }
                     }
 
                     YieldStatus::TcpWrite(status) => {
-                        let token = selector.get_token_mut_ref(status.token_id);
-                        *token = Token::new_write_tcp(token.fd(), status.buffer, task, status.result_ptr);
-                        selector.write(status.token_id);
+                        let mut token_ptr = status.token_ref;
+                        let token_ref = unsafe { token_ptr.as_ref() };
+                        let fd = token_ref.fd();
+                        unsafe { token_ptr.write(Token::new_write_tcp(fd, status.buffer, task, status.result_ptr)) };
+                        selector.write(token_ptr);
                     }
 
                     YieldStatus::TcpWriteAll(status) => {
-                        let token = selector.get_token_mut_ref(status.token_id);
-                        *token = Token::new_write_all_tcp(token.fd(), status.buffer, task, status.result_ptr);
-                        selector.write_all(status.token_id);
+                        let mut token_ptr = status.token_ref;
+                        let token_ref = unsafe { token_ptr.as_ref() };
+                        unsafe { token_ptr.write(Token::new_write_all_tcp(token_ref.fd(), status.buffer, task, status.result_ptr)) };
+                        selector.write_all(token_ptr);
                     }
 
                     YieldStatus::TcpClose(status) => {
-                        let token = selector.get_token_mut_ref(status.token_id);
-                        *token = Token::new_close_tcp(token.fd(), task);
-                        selector.close_connection(status.token_id);
+                        let mut token_ptr = status.token_ptr;
+                        let token_ref = unsafe { token_ptr.as_mut() };
+                        unsafe { token_ptr.write(Token::new_close_tcp(token_ref.fd(), task)) };
+                        selector.close_connection(token_ptr);
+                        //self.handle_coroutine_state(selector, task);
                     }
                 }
             }

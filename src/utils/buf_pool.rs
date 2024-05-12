@@ -1,9 +1,9 @@
 use std::cell::UnsafeCell;
 use std::intrinsics::{likely, unlikely};
 use std::{mem, ptr};
+use std::fmt::Debug;
 use std::mem::MaybeUninit;
 
-#[derive(Debug)]
 pub struct Buffer {
     slice: Box<[u8]>,
     offset: usize,
@@ -80,6 +80,12 @@ impl Buffer {
 impl Default for Buffer {
     fn default() -> Self {
         Buffer::new(0)
+    }
+}
+
+impl Debug for Buffer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.as_slice())
     }
 }
 

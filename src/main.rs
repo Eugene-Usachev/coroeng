@@ -2,10 +2,14 @@
 #![feature(trait_alias)]
 #![feature(coroutines, coroutine_trait)]
 #![feature(fn_traits)]
+#![feature(panic_info_message)]
 
 use std::io::Read;
 use std::net::ToSocketAddrs;
+use std::time::Duration;
 use crate::engine::net::tcp::{TcpListener, TcpStream};
+use crate::engine::sleep::sleep::sleep;
+use crate::utils::{Ptr, set_panic_hook};
 
 mod engine;
 mod utils;
@@ -41,10 +45,14 @@ fn tcp_benchmark() {
                 }
             });
         }
+
+        yield sleep(Duration::from_secs(123213213));
     });
 }
 
 
 fn main() {
+    set_panic_hook("worker on core 0".to_string());
+
     local_test();
 }

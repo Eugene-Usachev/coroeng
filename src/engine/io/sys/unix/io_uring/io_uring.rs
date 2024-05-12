@@ -2,17 +2,16 @@ use std::collections::VecDeque;
 use std::io::Error;
 use std::{mem, ptr};
 use std::cell::UnsafeCell;
+use std::os::fd::RawFd;
 use io_uring::{cqueue, IoUring, opcode, squeue, SubmissionQueue, CompletionQueue, Submitter, types};
 use io_uring::types::{SubmitArgs, Timespec};
-use slab::Slab;
 use crate::engine::io::{Selector, Token};
 use crate::engine::local::Scheduler;
 use crate::engine::net::TcpStream;
 use crate::{utils, write_ok};
-use crate::utils::hide_mut_unsafe;
+use crate::utils::{hide_mut_unsafe, Ptr};
 
 pub(crate) struct IoUringSelector {
-    tokens: Slab<Token>,
     timeout: SubmitArgs<'static, 'static>,
     /// # Why we need some cell?
     /// 
@@ -37,7 +36,6 @@ impl IoUringSelector {
     // FIXME: remove unsafe after [`IoUringSelector`] fixed
     pub(crate) unsafe fn new() -> IoUringSelector {
         let mut selector = IoUringSelector {
-            tokens: Slab::new(),
             timeout: SubmitArgs::new().timespec(&TIMEOUT),
             ring: UnsafeCell::new(IoUring::new(512).unwrap()),
             /// Should be enough for anybody, because it uses only when [`SubmissionQueue`] is full.
@@ -96,9 +94,7 @@ macro_rules! handle_ret {
     ($ret: expr, $result: expr) => {
         if $ret < 0 {
             let err = Error::last_os_error();
-            unsafe {
-                *$result = Err(err);
-            }
+            unsafe { $result.write(Err(err)); }
             continue;
         }
     };
@@ -108,15 +104,6 @@ impl Selector for IoUringSelector {
     #[inline(always)]
     fn need_reregister(&self) -> bool {
         true
-    }
-
-    fn insert_token(&mut self, token: Token) -> usize {
-        self.tokens.insert(token)
-    }
-
-    #[inline(always)]
-    fn get_token_mut_ref(&mut self, token_id: usize) -> &mut Token {
-        unsafe { self.tokens.get_unchecked_mut(token_id) }
     }
 
     fn poll(&mut self, scheduler: &mut Scheduler) -> Result<(), ()> {
@@ -151,13 +138,10 @@ impl Selector for IoUringSelector {
 
         for cqe in &mut cq {
             let ret = cqe.result();
-            let token_index = cqe.user_data() as usize;
-            let token_ref = unsafe { self.tokens.get_unchecked_mut(token_index) };
+            let token_ptr = Ptr::from(cqe.user_data() as usize);
+            let token = unsafe { token_ptr.read() };
 
-            let mut token = Token::new_empty(token_ref.fd());
-            mem::swap(token_ref, &mut token);
-
-            println!("Handle token: {token:?} with ret: {ret}");
+            println!("Handle token: {:?} with ret: {ret}", unsafe { token_ptr.as_ref() });
 
             match token {
                 Token::Empty(_) => {}
@@ -166,8 +150,7 @@ impl Selector for IoUringSelector {
                     handle_ret!(ret, token.result);
 
                     let incoming_fd = ret;
-                    let token_id = self.insert_token(Token::new_empty(incoming_fd));
-                    write_ok!(token.result, TcpStream::new(token_id));
+                    write_ok!(token.result, TcpStream::new(incoming_fd));
 
                     scheduler.handle_coroutine_state(self, token.coroutine);
                 }
@@ -178,8 +161,8 @@ impl Selector for IoUringSelector {
                     println!("poll ret: {}", ret);
 
                     let buffer = utils::buffer();
-                    *token_ref = Token::new_read_tcp(token.fd, buffer, token.coroutine, token.result);
-                    self.register(token_index);
+                    unsafe { token_ptr.write(Token::new_read_tcp(token.fd, buffer, token.coroutine, token.result)) };
+                    self.register(token_ptr);
                 }
 
                 Token::ReadTcp(token) => {
@@ -210,8 +193,8 @@ impl Selector for IoUringSelector {
                             types::Fd(token.fd),
                             unsafe { token.buffer.as_ptr().add(token.bytes_written) },
                             (token.buffer.len() - token.bytes_written) as u32
-                        ).build().user_data(token_index as _);
-                        *token_ref = Token::WriteAllTcp(token);
+                        ).build().user_data(token_ptr.as_u64());
+                        unsafe { token_ptr.write(Token::WriteAllTcp(token)) };
                         self.push_sqe(sqe);
                         continue;
                     }
@@ -222,7 +205,7 @@ impl Selector for IoUringSelector {
                 }
 
                 Token::CloseTcp(token) => {
-                    self.deregister(token_index);
+                    self.deregister(token.fd);
                     scheduler.handle_coroutine_state(self, token.coroutine)
                 }
             }
@@ -231,8 +214,8 @@ impl Selector for IoUringSelector {
         Ok(())
     }
 
-    fn register(&mut self, token_id: usize) {
-        let token = unsafe { self.tokens.get_unchecked_mut(token_id) };
+    fn register(&mut self, token_ptr: Ptr<Token>) {
+        let token = unsafe { token_ptr.as_mut() };
         let mut sqe = match token {
             Token::Empty(_) => {
                 return;
@@ -270,25 +253,27 @@ impl Selector for IoUringSelector {
             }
         };
 
-        sqe = sqe.user_data(token_id as _);
+        sqe = sqe.user_data(token_ptr.as_u64());
 
-        println!("register sqe: {:?} for token id: {token_id}, sqe: {sqe:?}", token);
+        //println!("register sqe: {:?} for token id: {token_id}, sqe: {sqe:?}", token);
         self.push_sqe(sqe);
     }
 
-    fn deregister(&mut self, token_id: usize) -> Token {
-        self.tokens.remove(token_id)
+    #[inline(always)]
+    fn deregister(&mut self, fd: RawFd) {}
+
+    #[inline(always)]
+    fn write(&mut self, token_ref: Ptr<Token>) {
+        self.register(token_ref);
     }
 
-    fn write(&mut self, token_id: usize) {
-        self.register(token_id);
+    #[inline(always)]
+    fn write_all(&mut self, token_ref: Ptr<Token>) {
+        self.register(token_ref);
     }
 
-    fn write_all(&mut self, token_id: usize) {
-        self.register(token_id);
-    }
-
-    fn close_connection(&mut self, token_id: usize) {
-        self.register(token_id);
+    #[inline(always)]
+    fn close_connection(&mut self, token_ref: Ptr<Token>) {
+        self.register(token_ref);
     }
 }

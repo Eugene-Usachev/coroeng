@@ -1,3 +1,4 @@
+use std::thread;
 /// Creates a new coroutine with the passed block of code.
 ///
 /// # Difference with new_coroutine_move!
@@ -158,18 +159,20 @@ macro_rules! run_on_all_cores {
         let cores = core_affinity::get_core_ids().unwrap();
         for i in 1..cores.len() {
             let cores = cores.clone();
-            std::thread::spawn(move || {
-                core_affinity::set_for_current(cores[i]);
-                // TODO accept from cfg
-                $crate::utils::BufPool::init(4096);
-                $crate::engine::local::Scheduler::init(cores[i]);
-                let scheduler = $crate::engine::local::local_scheduler();
-                scheduler.run(Box::pin(
-                    $crate::new_coroutine!({
-                        $func
-                    })
-                ));
-            });
+            std::thread::Builder::new()
+                .name(format!("worker on core: {}", i))
+                .spawn(move || {
+                    core_affinity::set_for_current(cores[i]);
+                    // TODO accept from cfg
+                    $crate::utils::BufPool::init(4096);
+                    $crate::engine::local::Scheduler::init(cores[i]);
+                    let scheduler = $crate::engine::local::local_scheduler();
+                    scheduler.run(Box::pin(
+                        $crate::new_coroutine!({
+                            $func
+                        })
+                    ));
+                });
         }
 
         core_affinity::set_for_current(cores[0]);

@@ -2,14 +2,16 @@
 //!
 //! Selector is a trait for working with systems selectors like epoll, kqueue, io_uring etc.
 
+use std::os::fd::RawFd;
 // TODO: here in docs we use "the selector" instead of [`Selector`] and "register with the selector" instead of something better.
-
 use crate::engine::io::sys::unix::{EpolledSelector, IoUringSelector};
 use crate::engine::io::Token;
 use crate::engine::local::Scheduler;
 // needed for docs.
 use crate::engine::io::token::{EmptyToken, WriteTcpToken, WriteAllTcpToken};
+use crate::utils::Ptr;
 
+/// TODO: new docs, we have no [`Slab<Token>`] now
 /// Selector is a trait for working with systems selectors like epoll, kqueue, io_uring etc.
 ///
 /// The main concept is as follows:
@@ -38,19 +40,6 @@ pub(crate) trait Selector {
     /// [`IoUringSelector`] returns true.
     fn need_reregister(&self) -> bool;
     /// Insert token into the selector, returns the token identifier.
-    fn insert_token(&mut self, token: Token) -> usize;
-    /// Returns mut reference to the token by identifier. Uses for replacing the token.
-    ///
-    /// # Panics
-    /// If the token doesn't exist.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// let token = selector.get_token_mut_ref(stream);
-    /// *token = Token::new_write_tcp(token.fd(), buf, task, result);
-    /// ```
-    fn get_token_mut_ref(&mut self, token_id: usize) -> &mut Token;
     /// Polls the selector for coroutines that are ready.
     /// This method will wake the coroutines up.
     ///
@@ -62,7 +51,7 @@ pub(crate) trait Selector {
     /// So, you should call this method, when no ready coroutines.
     fn poll(&mut self, scheduler: &mut Scheduler) -> Result<(), ()>;
     /// Registers the token with the selector.
-    fn register(&mut self, token_id: usize);
+    fn register(&mut self, token_ptr: Ptr<Token>);
     /// Deregisters the token with the selector by the token identifier.
     ///
     /// # Panics
@@ -77,7 +66,7 @@ pub(crate) trait Selector {
     ///
     /// If the token id is still in use, for example after call [`Selector::write`] but before [`Selector::poll`],
     /// it will lead to panic.
-    fn deregister(&mut self, token_id: usize) -> Token;
+    fn deregister(&mut self, fd: RawFd);
 
     /// Tells the selector that [`WriteTcpToken`] or another writable token is ready.
     /// So, this method returns before the write syscall is done. The writing will be done in [`Selector::poll`].
@@ -90,7 +79,7 @@ pub(crate) trait Selector {
     ///
     /// This method will lead to one syscall. Only the part of the buffer will be written.
     /// The number of bytes written will be stored in the result variable.
-    fn write(&mut self, token_id: usize);
+    fn write(&mut self, token_ref: Ptr<Token>);
     /// Tells the selector that [`WriteAllTcpToken`] or another writable token is ready.
     /// So, this method returns before the write syscall is done. The writing will be done in [`Selector::poll`].
     ///
@@ -101,7 +90,7 @@ pub(crate) trait Selector {
     /// # Note
     ///
     /// This method can lead to one or more syscalls.
-    fn write_all(&mut self, token_id: usize);
+    fn write_all(&mut self, token_ref: Ptr<Token>);
     /// TODO: docs
-    fn close_connection(&mut self, token_id: usize);
+    fn close_connection(&mut self, token_ref: Ptr<Token>);
 }

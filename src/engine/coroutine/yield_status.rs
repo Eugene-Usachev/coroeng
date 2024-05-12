@@ -3,8 +3,9 @@
 
 use std::net::SocketAddr;
 use std::time::Duration;
+use crate::engine::io::Token;
 use crate::engine::net::{TcpListener, TcpStream};
-use crate::utils::Buffer;
+use crate::utils::{Buffer, Ptr};
 
 /// Represents a new TCP listener to be created.
 #[derive(Debug)]
@@ -21,7 +22,7 @@ pub(crate) struct TcpAccept {
     /// Indicates whether the socket is registered to the selector.
     pub is_registered: bool,
     /// The token ID associated with the TCP accept operation.
-    pub token_id: usize,
+    pub token_ref: Ptr<Token>,
     /// Pointer to store the result of the TCP accept operation.
     /// If success, the result will contain a [`TcpStream`].
     pub result_ptr: *mut Result<TcpStream, std::io::Error>,
@@ -33,7 +34,7 @@ pub(crate) struct TcpRead {
     /// Indicates whether the socket is registered to the selector.
     pub is_registered: bool,
     /// The token ID associated with the TCP read operation.
-    pub token_id: usize,
+    pub token_ref: Ptr<Token>,
     /// Pointer to store the result of the TCP read operation.
     /// If success, the result will contain a slice of bytes read.
     pub result_ptr: *mut Result<&'static [u8], std::io::Error>,
@@ -43,7 +44,7 @@ pub(crate) struct TcpRead {
 #[derive(Debug)]
 pub(crate) struct TcpWrite {
     /// The token ID associated with the TCP write operation.
-    pub token_id: usize,
+    pub token_ref: Ptr<Token>,
     /// The buffer containing data to be written.
     pub buffer: Buffer,
     /// Pointer to store the result of the TCP write operation.
@@ -55,7 +56,7 @@ pub(crate) struct TcpWrite {
 #[derive(Debug)]
 pub(crate) struct TcpWriteAll {
     /// The token ID associated with the TCP write all operation.
-    pub token_id: usize,
+    pub token_ref: Ptr<Token>,
     /// The buffer containing data to be written.
     pub buffer: Buffer,
     /// Pointer to store the result of the TCP write all operation.
@@ -67,7 +68,7 @@ pub(crate) struct TcpWriteAll {
 #[derive(Debug)]
 pub(crate) struct TcpClose {
     /// The token ID associated with the TCP close operation.
-    pub token_id: usize,
+    pub token_ptr: Ptr<Token>,
 }
 
 /// The status of the coroutine yield. This is the one way to communicate with the scheduler.
@@ -147,27 +148,27 @@ impl YieldStatus {
     }
 
     /// Create a YieldStatus variant [`TcpAccept`].
-    pub fn tcp_accept(is_registered: bool, token_id: usize, result_ptr: *mut Result<TcpStream, std::io::Error>) -> Self {
-        YieldStatus::TcpAccept(TcpAccept { is_registered, token_id, result_ptr })
+    pub fn tcp_accept(is_registered: bool, token_ref: Ptr<Token>, result_ptr: *mut Result<TcpStream, std::io::Error>) -> Self {
+        YieldStatus::TcpAccept(TcpAccept { is_registered, token_ref, result_ptr })
     }
 
     /// Create a YieldStatus variant [`TcpRead`].
-    pub fn tcp_read(is_registered: bool, token_id: usize, result_ptr: *mut Result<&'static [u8], std::io::Error>) -> Self {
-        YieldStatus::TcpRead(TcpRead { is_registered, token_id, result_ptr })
+    pub fn tcp_read(is_registered: bool, token_ref: Ptr<Token>, result_ptr: *mut Result<&'static [u8], std::io::Error>) -> Self {
+        YieldStatus::TcpRead(TcpRead { is_registered, token_ref, result_ptr })
     }
 
     /// Create a YieldStatus variant [`TcpWrite`].
-    pub fn tcp_write(token_id: usize, buffer: Buffer, result_ptr: *mut Result<usize, std::io::Error>) -> Self {
-        YieldStatus::TcpWrite(TcpWrite { token_id, buffer, result_ptr })
+    pub fn tcp_write(token_ref: Ptr<Token>, buffer: Buffer, result_ptr: *mut Result<usize, std::io::Error>) -> Self {
+        YieldStatus::TcpWrite(TcpWrite { token_ref, buffer, result_ptr })
     }
 
     /// Create a YieldStatus variant [`TcpWriteAll`].
-    pub fn tcp_write_all(token_id: usize, buffer: Buffer, result_ptr: *mut Result<(), std::io::Error>) -> Self {
-        YieldStatus::TcpWriteAll(TcpWriteAll { token_id, buffer, result_ptr })
+    pub fn tcp_write_all(token_ref: Ptr<Token>, buffer: Buffer, result_ptr: *mut Result<(), std::io::Error>) -> Self {
+        YieldStatus::TcpWriteAll(TcpWriteAll { token_ref, buffer, result_ptr })
     }
 
     /// Create a YieldStatus variant [`TcpClose`].
-    pub fn tcp_close(token_id: usize) -> Self {
-        YieldStatus::TcpClose(TcpClose { token_id })
+    pub fn tcp_close(token_ref: Ptr<Token>) -> Self {
+        YieldStatus::TcpClose(TcpClose { token_ptr: token_ref })
     }
 }

@@ -5,6 +5,8 @@ use crate::engine::coroutine::YieldStatus;
 use crate::engine::io::sys::unix::epoll::net::get_tcp_listener_fd;
 use crate::engine::net::tcp::TcpStream;
 use crate::{spawn_local_move};
+use crate::engine::io::Token;
+use crate::utils::Ptr;
 
 /// A TCP socket server, listening for connections.
 ///
@@ -41,18 +43,24 @@ use crate::{spawn_local_move};
 /// }
 /// ```
 pub struct TcpListener {
-    pub(crate) token_id: usize,
+    pub(crate) token_ptr: Ptr<Token>,
     /// OwnedFd is required for Drop
-    pub(crate) fd: RawFd,
     pub(crate) is_registered: bool
 }
 
 impl TcpListener {
+    pub fn from_fd(fd: RawFd) -> Self {
+        Self {
+            token_ptr: Ptr::new(Token::new_empty(fd)),
+            is_registered: false
+        }
+    }
+
     /// Returns the token_id of the [`TcpListener`].
     ///
     /// Uses for low-level work with the scheduler. If you don't know what it is, don't use it.
-    pub fn token_id(&self) -> usize {
-        self.token_id
+    pub fn token_ptr(&mut self) -> Ptr<Token> {
+        self.token_ptr
     }
 
     /// Returns the fd for the [`TcpListener`].
@@ -118,24 +126,25 @@ impl TcpListener {
         if !is_registered {
             self.is_registered = true;
         }
-        YieldStatus::tcp_accept(is_registered, self.token_id, res)
+        YieldStatus::tcp_accept(is_registered, self.token_ptr, res)
     }
 
     /// Closes the [`TcpListener`] by token_id. After closing, the [`TcpListener`] can not be used.
-    fn close(token_id: usize) -> YieldStatus {
-        YieldStatus::tcp_close(token_id)
+    fn close(token_ref: Ptr<Token>) -> YieldStatus {
+        YieldStatus::tcp_close(token_ref)
     }
 }
 
 impl Drop for TcpListener {
     fn drop(&mut self) {
-        if !self.is_registered {
-            return;
+        let token_ptr = self.token_ptr;
+        if self.is_registered {
+            spawn_local_move!({
+                yield TcpListener::close(token_ptr);
+                unsafe { token_ptr.drop_in_place(); }
+            });
+        } else {
+            unsafe { token_ptr.drop_in_place(); }
         }
-
-        let token_id = self.token_id;
-        spawn_local_move!({
-            yield TcpListener::close(token_id);
-        });
     }
 }
