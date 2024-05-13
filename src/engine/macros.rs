@@ -164,7 +164,7 @@ macro_rules! run_on_all_cores {
                 .spawn(move || {
                     core_affinity::set_for_current(cores[i]);
                     // TODO accept from cfg
-                    $crate::utils::BufPool::init(4096);
+                    $crate::engine::utils::BufPool::init(4096);
                     $crate::engine::local::Scheduler::init(cores[i]);
                     let scheduler = $crate::engine::local::local_scheduler();
                     scheduler.run(Box::pin(
@@ -177,7 +177,7 @@ macro_rules! run_on_all_cores {
 
         core_affinity::set_for_current(cores[0]);
         // TODO accept from cfg
-        $crate::utils::BufPool::init(4096);
+        $crate::engine::utils::BufPool::init(4096);
         $crate::engine::local::Scheduler::init(cores[0]);
         let scheduler = $crate::engine::local::local_scheduler();
         scheduler.run(Box::pin(

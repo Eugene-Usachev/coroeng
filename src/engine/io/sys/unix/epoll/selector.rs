@@ -15,7 +15,7 @@ use crate::engine::io::State;
 use crate::engine::local::Scheduler;
 use crate::engine::net::TcpStream;
 use crate::{write_err, write_ok};
-use crate::utils::Ptr;
+use crate::engine::utils::Ptr;
 
 pub(crate) const REQ_BUF_LEN: usize = 64 * 1024;
 pub(crate) const RES_BUF_LEN: usize = 64 * 1024;

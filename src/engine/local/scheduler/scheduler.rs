@@ -14,7 +14,7 @@ use crate::engine::io::sys::unix::{EpolledSelector,};
 use crate::engine::io::{Selector, State};
 use crate::engine::net::TcpListener;
 use crate::engine::sleep::sleep::SleepingCoroutine;
-use crate::utils::{hide_mut_unsafe, Ptr};
+use crate::engine::utils::{hide_mut_unsafe, Ptr};
 
 thread_local! {
     pub static LOCAL_SCHEDULER: UnsafeCell<MaybeUninit<Scheduler>> = UnsafeCell::new(MaybeUninit::zeroed());

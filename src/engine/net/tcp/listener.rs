@@ -6,7 +6,7 @@ use crate::engine::io::sys::unix::epoll::net::get_tcp_listener_fd;
 use crate::engine::net::tcp::TcpStream;
 use crate::{spawn_local_move};
 use crate::engine::io::State;
-use crate::utils::Ptr;
+use crate::engine::utils::Ptr;
 
 /// A TCP socket server, listening for connections.
 ///

@@ -9,7 +9,7 @@ use crate::engine::io::State;
 use crate::engine::local::Scheduler;
 // needed for docs.
 use crate::engine::io::state::{WriteTcpState, WriteAllTcpState};
-use crate::utils::Ptr;
+use crate::engine::utils::Ptr;
 
 /// Selector is a trait for working with systems selectors like epoll, kqueue, io_uring etc.
 ///

@@ -8,8 +8,8 @@ use io_uring::types::{SubmitArgs, Timespec};
 use crate::engine::io::{Selector, State};
 use crate::engine::local::Scheduler;
 use crate::engine::net::TcpStream;
-use crate::{utils, write_ok};
-use crate::utils::{hide_mut_unsafe, Ptr};
+use crate::{engine::utils, write_ok};
+use crate::engine::utils::{hide_mut_unsafe, Ptr};
 
 pub(crate) struct IoUringSelector {
     timeout: SubmitArgs<'static, 'static>,

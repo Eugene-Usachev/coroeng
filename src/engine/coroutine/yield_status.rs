@@ -5,7 +5,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use crate::engine::io::State;
 use crate::engine::net::{TcpListener, TcpStream};
-use crate::utils::{Buffer, Ptr};
+use crate::engine::utils::{Buffer, Ptr};
 
 /// Represents a new TCP listener to be created.
 #[derive(Debug)]

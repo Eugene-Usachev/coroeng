@@ -9,10 +9,9 @@ use std::net::ToSocketAddrs;
 use std::time::Duration;
 use crate::engine::net::tcp::{TcpListener, TcpStream};
 use crate::engine::sleep::sleep::sleep;
-use crate::utils::{Ptr, set_panic_hook};
+use crate::engine::utils::{Ptr, set_panic_hook};
 
 mod engine;
-mod utils;
 
 pub fn local_test() {
     tcp_benchmark();
@@ -38,7 +37,7 @@ fn tcp_benchmark() {
                         break;
                     }
 
-                    let mut buf = utils::buffer();
+                    let mut buf = engine::utils::buffer();
                     buf.append(slice);
 
                     let res = io_yield!(TcpStream::write_all, &mut stream, buf);

@@ -3,7 +3,7 @@ use std::os::fd::RawFd;
 use crate::engine::coroutine::YieldStatus;
 use crate::{spawn_local_move};
 use crate::engine::io::State;
-use crate::utils::{Buffer, Ptr};
+use crate::engine::utils::{Buffer, Ptr};
 
 pub struct TcpStream {
     is_registered: bool,

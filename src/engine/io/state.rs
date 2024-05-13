@@ -3,7 +3,7 @@ use std::fmt::{Debug, Formatter};
 use std::os::fd::{RawFd};
 use crate::engine::coroutine::coroutine::CoroutineImpl;
 use crate::engine::net::tcp::TcpStream;
-use crate::utils::Buffer;
+use crate::engine::utils::Buffer;
 
 pub(crate) struct EmptyState {
     fd: RawFd
