@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::ops::Coroutine as StdCoroutine;
 use crate::engine::coroutine::YieldStatus;
 
-/// The alias for [`StdCoroutine`]<Yield=YieldStatus, Return=()>.
+/// The alias for [`StdCoroutine`]<Yield=[`YieldStatus`], Return=()>.
 /// The scheduler works only with this type of the coroutines.
 pub trait Coroutine = StdCoroutine<Yield=YieldStatus, Return=()>;
 

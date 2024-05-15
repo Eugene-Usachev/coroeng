@@ -34,7 +34,7 @@ const TIMEOUT: Timespec = Timespec::new().nsec(500_000);
 
 impl IoUringSelector {
     // FIXME: remove unsafe after [`IoUringSelector`] fixed
-    pub(crate) unsafe fn new() -> IoUringSelector {
+    pub(crate) fn new() -> IoUringSelector {
         let mut selector = IoUringSelector {
             timeout: SubmitArgs::new().timespec(&TIMEOUT),
             ring: UnsafeCell::new(IoUring::new(512).unwrap()),
@@ -205,7 +205,6 @@ impl Selector for IoUringSelector {
                 }
 
                 State::CloseTcp(state) => {
-                    self.deregister(state.fd);
                     scheduler.handle_coroutine_state(self, state.coroutine)
                 }
             }
@@ -255,7 +254,7 @@ impl Selector for IoUringSelector {
 
         sqe = sqe.user_data(state_ptr.as_u64());
 
-        //println!("register sqe: {:?} for state id: {state_id}, sqe: {sqe:?}", state);
+        println!("register sqe: {:?} for state fd: {}, sqe: {sqe:?}", state, state.fd());
         self.push_sqe(sqe);
     }
 

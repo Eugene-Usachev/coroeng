@@ -9,7 +9,7 @@ use std::net::ToSocketAddrs;
 use std::time::Duration;
 use crate::engine::net::tcp::{TcpListener, TcpStream};
 use crate::engine::sleep::sleep::sleep;
-use crate::engine::utils::{Ptr, set_panic_hook};
+use crate::engine::utils::{set_panic_hook};
 
 mod engine;
 
@@ -49,9 +49,7 @@ fn tcp_benchmark() {
     });
 }
 
-
 fn main() {
     set_panic_hook("worker on core 0".to_string());
-
     local_test();
 }
