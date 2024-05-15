@@ -17,6 +17,18 @@ impl<T> Ptr<T> {
     }
 
     #[inline(always)]
+    pub fn null() -> Self {
+        Self {
+            ptr: ptr::null_mut()
+        }
+    }
+
+    #[inline(always)]
+    pub fn is_null(&self) -> bool {
+        self.ptr.is_null()
+    }
+
+    #[inline(always)]
     pub fn as_ptr(&self) -> *mut T {
         self.ptr
     }

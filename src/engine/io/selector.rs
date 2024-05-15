@@ -7,8 +7,6 @@ use std::os::fd::RawFd;
 use crate::engine::io::sys::unix::{EpolledSelector, IoUringSelector};
 use crate::engine::io::State;
 use crate::engine::local::Scheduler;
-// needed for docs.
-use crate::engine::io::state::{WriteTcpState, WriteAllTcpState};
 use crate::engine::utils::Ptr;
 
 /// Selector is a trait for working with systems selectors like epoll, kqueue, io_uring etc.
@@ -49,7 +47,7 @@ pub(crate) trait Selector {
     /// After deregistering, the [`State`] will be ignored in [`Selector::poll`].
     fn deregister(&mut self, fd: RawFd);
 
-    /// Tells the selector that [`WriteTcpState`] or another writable [`State`] is ready.
+    /// Tells the selector that [`WriteTcpState`](crate::engine::io::WriteTcpState) or another writable [`State`] is ready.
     /// So, this method returns before the write syscall is done. The writing will be done in [`Selector::poll`].
     ///
     /// # Panics
@@ -61,7 +59,7 @@ pub(crate) trait Selector {
     /// This method will lead to one syscall. Only the part of the buffer will be written.
     /// The number of bytes written will be stored in the result variable.
     fn write(&mut self, state_ref: Ptr<State>);
-    /// Tells the selector that [`WriteAllTcpState`] or another writable [`State`] is ready.
+    /// Tells the selector that [`WriteAllTcpState`](crate::engine::io::WriteAllTcpState) or another writable [`State`] is ready.
     /// So, this method returns before the write syscall is done. The writing will be done in [`Selector::poll`].
     ///
     /// # Panics
