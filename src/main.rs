@@ -1,23 +1,53 @@
-#![feature(core_intrinsics)]
-#![feature(trait_alias)]
-#![feature(coroutines, coroutine_trait)]
-#![feature(fn_traits)]
-#![feature(panic_info_message)]
+#![feature(coroutines)]
+#![feature(coroutine_trait)]
+#![feature(stmt_expr_attributes)]
+#![feature(gen_blocks)]
 
-use std::io::Read;
 use std::net::ToSocketAddrs;
-use std::time::Duration;
-use crate::engine::net::tcp::{TcpListener, TcpStream};
-use crate::engine::sleep::sleep::sleep;
-use crate::engine::utils::{set_panic_hook};
+use engine::net::tcp::{TcpListener, TcpStream};
+use engine::{io_yield, run_on_all_cores, spawn_local_move, coro};
+use engine::sync::{Mutex};
+use engine::utils::{set_panic_hook};
 
-mod engine;
+static L: Mutex<i32> = Mutex::new(0);
 
 pub fn local_test() {
     tcp_benchmark();
+
+    // run_on_all_cores!({
+    //     for i in 0..10 {
+    //         let res = L.lock();
+    //         println!("was locked: {}", res.is_ok());
+    //         if res.is_ok() {
+    //             let mut r = res.unwrap();
+    //             *r += i;
+    //         }
+    //     }
+    // });
 }
 
 fn tcp_benchmark() {
+    #[coro]
+    fn handle_tcp_client(mut stream: TcpStream) {
+        loop {
+            let slice = io_yield!(TcpStream::read, &mut stream).unwrap();
+
+            if slice.is_empty() {
+                break;
+            }
+
+            let mut buf = engine::utils::buffer();
+            buf.append(slice);
+
+            let res = io_yield!(TcpStream::write_all, &mut stream, buf);
+
+            if res.is_err() {
+                println!("write failed, reason: {}", res.err().unwrap());
+                break;
+            }
+        }
+    }
+
     run_on_all_cores!({
         let mut listener = io_yield!(TcpListener::new, "engine:8081".to_socket_addrs().unwrap().next().unwrap());
         loop {
@@ -29,23 +59,8 @@ fn tcp_benchmark() {
             }
 
             let mut stream: TcpStream = stream_.unwrap();
-            spawn_local_move!({
-                loop {
-                    let mut slice = io_yield!(TcpStream::read, &mut stream).unwrap();
-
-                    if slice.is_empty() {
-                        break;
-                    }
-
-                    let mut buf = engine::utils::buffer();
-                    buf.append(slice);
-
-                    let res = io_yield!(TcpStream::write_all, &mut stream, buf);
-                }
-            });
+            spawn_local_move!(handle_tcp_client(stream));
         }
-
-        yield sleep(Duration::from_secs(123213213));
     });
 }
 
