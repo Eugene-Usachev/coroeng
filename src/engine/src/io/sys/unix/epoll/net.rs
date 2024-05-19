@@ -56,18 +56,6 @@ pub(crate) fn setup_connection(fd: &BorrowedFd) {
     }
 }
 
-/// Sets blocking IO for a file descriptor.
-///
-/// # Panics
-///
-/// If the syscall fails. In theory this is impossible.
-#[inline]
-pub(crate) unsafe fn set_blocking(fd: &BorrowedFd) {
-    unsafe {
-        check_error(syscall(SYS_fcntl, fd.as_raw_fd(), F_SETFL, 0), "cannot set blocking", true);
-    }
-}
-
 /// Sets non-blocking IO for a file descriptor.
 ///
 /// # Panics

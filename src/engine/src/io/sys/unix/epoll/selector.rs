@@ -18,7 +18,6 @@ use crate::{write_err, write_ok};
 use crate::utils::Ptr;
 
 pub(crate) const REQ_BUF_LEN: usize = 64 * 1024;
-pub(crate) const RES_BUF_LEN: usize = 64 * 1024;
 pub(crate) const MAX_EPOLL_EVENTS_RETURNED: usize = 256;
 
 // We need to keep the size of the struct as small as possible to cache it.
@@ -26,8 +25,7 @@ pub(crate) struct EpolledSelector {
     epoll: Epoll,
     unhandled_states: Vec<Ptr<State>>,
     events: [EpollEvent; MAX_EPOLL_EVENTS_RETURNED],
-    req_buf: [u8; REQ_BUF_LEN],
-    res_buf: [u8; RES_BUF_LEN]
+    req_buf: [u8; REQ_BUF_LEN]
 }
 
 impl EpolledSelector {
@@ -39,8 +37,7 @@ impl EpolledSelector {
             epoll,
             unhandled_states: Vec::with_capacity(8),
             events: [EpollEvent::empty(); MAX_EPOLL_EVENTS_RETURNED],
-            req_buf: [0;  REQ_BUF_LEN],
-            res_buf: [0; RES_BUF_LEN]
+            req_buf: [0;  REQ_BUF_LEN]
         })
     }
 

@@ -5,7 +5,7 @@ use crate::coroutine::YieldStatus;
 use crate::io::sys::unix::epoll::net::get_tcp_listener_fd;
 use crate::net::tcp::TcpStream;
 use crate::io::State;
-use crate::{spawn_local, spawn_local_move};
+use crate::{spawn_local};
 use crate::utils::Ptr;
 
 /// A TCP socket server, listening for connections.
@@ -20,12 +20,12 @@ use crate::utils::Ptr;
 /// use std::net::SocketAddr;
 /// use engine::net::tcp::TcpListener;
 /// use engine::io::io_yield;
-/// use engine::{io_yield, spawn_local};
+/// use engine::{ret_yield, spawn_local};
 /// use engine::net::TcpStream;
 ///
-/// let mut listener = io_yield!(TcpListener::new, "localhost:8081".to_socket_addrs().unwrap().next().unwrap());
+/// let mut listener = ret_yield!(TcpListener::new, "localhost:8081".to_socket_addrs().unwrap().next().unwrap());
 /// loop {
-///     let stream_ = io_yield!(TcpListener::accept, &mut listener);
+///     let stream_ = ret_yield!(TcpListener::accept, &mut listener);
 ///     if stream_.is_err() {
 ///         println!("accept failed, reason: {}", stream_.err().unwrap());
 ///         continue;
@@ -34,12 +34,12 @@ use crate::utils::Ptr;
 ///     let mut stream: TcpStream = stream_.unwrap();
 ///     spawn_local!({
 ///         loop {
-///             let mut slice = io_yield!(TcpStream::read, &mut stream).expect("read failed");
+///             let mut slice = ret_yield!(TcpStream::read, &mut stream).expect("read failed");
 ///             if slice.is_empty() {
 ///                 break;
 ///             }
 ///
-///             io_yield!(TcpStream::write_all, &mut stream, slice.to_vec()).expect("write failed");
+///             ret_yield!(TcpStream::write_all, &mut stream, slice.to_vec()).expect("write failed");
 ///         }
 ///     });
 /// }
@@ -80,11 +80,11 @@ impl TcpListener {
     ///
     /// ```
     /// use std::net::SocketAddr;
-    /// use engine::io_yield;
+    /// use engine::ret_yield;
     /// use engine::net::tcp::Listener;
     /// use engine::io::io_yield;
     ///
-    /// let mut listener = io_yield!(TcpListener::new, "localhost:8081".to_socket_addrs().unwrap().next().unwrap());
+    /// let mut listener = ret_yield!(TcpListener::new, "localhost:8081".to_socket_addrs().unwrap().next().unwrap());
     /// ```
     pub fn new(addr: SocketAddr, res: *mut TcpListener) -> YieldStatus {
         YieldStatus::new_tcp_listener(addr, res)
@@ -102,11 +102,11 @@ impl TcpListener {
     /// use std::net::SocketAddr;
     /// use engine::net::{TcpListener, TcpStream};
     /// use engine::io::io_yield;
-    /// use engine::{io_yield, spawn_local};
+    /// use engine::{ret_yield, spawn_local};
     ///
-    /// let mut listener = io_yield!(TcpListener::new, "localhost:8081".to_socket_addrs().unwrap().next().unwrap());
+    /// let mut listener = ret_yield!(TcpListener::new, "localhost:8081".to_socket_addrs().unwrap().next().unwrap());
     /// loop {
-    ///     let stream_ = io_yield!(TcpListener::accept, &mut listener);
+    ///     let stream_ = ret_yield!(TcpListener::accept, &mut listener);
     ///     if stream_.is_err() {
     ///         println!("accept failed, reason: {}", stream_.err().unwrap());
     ///         continue;
@@ -115,12 +115,12 @@ impl TcpListener {
     ///     let mut stream: TcpStream = stream_.unwrap();
     ///     spawn_local!({
     ///         loop {
-    ///             let mut slice = io_yield!(TcpStream::read, &mut stream).expect("read failed");
+    ///             let mut slice = ret_yield!(TcpStream::read, &mut stream).expect("read failed");
     ///             if slice.is_empty() {
     ///                 break;
     ///             }
     ///
-    ///             io_yield!(TcpStream::write_all, &mut stream, slice.to_vec()).expect("write failed");
+    ///             ret_yield!(TcpStream::write_all, &mut stream, slice.to_vec()).expect("write failed");
     ///         }
     ///     });
     /// }
@@ -143,7 +143,7 @@ impl Drop for TcpListener {
     fn drop(&mut self) {
         let state_ptr = self.state_ptr;
         if self.is_registered {
-            spawn_local_move!({
+            spawn_local!({
                 yield TcpListener::close(state_ptr);
                 unsafe { state_ptr.drop_in_place(); }
             });

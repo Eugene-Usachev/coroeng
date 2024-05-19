@@ -9,66 +9,66 @@ use crate::utils::{Buffer, Ptr};
 
 /// Represents a new TCP listener to be created.
 #[derive(Debug)]
-pub(crate) struct NewTcpListener {
+pub struct NewTcpListener {
     /// The address on which the TCP listener will listen.
-    pub address: SocketAddr,
+    pub(crate) address: SocketAddr,
     /// Pointer to store the newly created [`TcpListener`].
-    pub listener_ptr: *mut TcpListener,
+    pub(crate) listener_ptr: *mut TcpListener,
 }
 
 /// Represents a TCP accept operation.
 #[derive(Debug)]
-pub(crate) struct TcpAccept {
+pub struct TcpAccept {
     /// Indicates whether the socket is registered to the selector.
-    pub is_registered: bool,
+    pub(crate) is_registered: bool,
     /// The state ID associated with the TCP accept operation.
-    pub state_ref: Ptr<State>,
+    pub(crate) state_ref: Ptr<State>,
     /// Pointer to store the result of the TCP accept operation.
     /// If success, the result will contain a [`TcpStream`].
-    pub result_ptr: *mut Result<TcpStream, std::io::Error>,
+    pub(crate) result_ptr: *mut Result<TcpStream, std::io::Error>,
 }
 
 /// Represents a TCP read operation.
 #[derive(Debug)]
-pub(crate) struct TcpRead {
+pub struct TcpRead {
     /// Indicates whether the socket is registered to the selector.
-    pub is_registered: bool,
+    pub(crate) is_registered: bool,
     /// The state ID associated with the TCP read operation.
-    pub state_ref: Ptr<State>,
+    pub(crate) state_ref: Ptr<State>,
     /// Pointer to store the result of the TCP read operation.
     /// If success, the result will contain a slice of bytes read.
-    pub result_ptr: *mut Result<&'static [u8], std::io::Error>,
+    pub(crate) result_ptr: *mut Result<&'static [u8], std::io::Error>,
 }
 
 /// Represents a TCP write operation.
 #[derive(Debug)]
-pub(crate) struct TcpWrite {
+pub struct TcpWrite {
     /// The state ID associated with the TCP write operation.
-    pub state_ref: Ptr<State>,
+    pub(crate) state_ref: Ptr<State>,
     /// The buffer containing data to be written.
-    pub buffer: Buffer,
+    pub(crate) buffer: Buffer,
     /// Pointer to store the result of the TCP write operation.
     /// If success, the result will contain the number of bytes written.
-    pub result_ptr: *mut Result<usize, std::io::Error>,
+    pub(crate) result_ptr: *mut Result<usize, std::io::Error>,
 }
 
 /// Represents a TCP write all operation.
 #[derive(Debug)]
-pub(crate) struct TcpWriteAll {
+pub struct TcpWriteAll {
     /// The state ID associated with the TCP write all operation.
-    pub state_ref: Ptr<State>,
+    pub(crate) state_ref: Ptr<State>,
     /// The buffer containing data to be written.
-    pub buffer: Buffer,
+    pub(crate) buffer: Buffer,
     /// Pointer to store the result of the TCP write all operation.
     /// If success, the result will contain `()`.
-    pub result_ptr: *mut Result<(), std::io::Error>,
+    pub(crate) result_ptr: *mut Result<(), std::io::Error>,
 }
 
 /// Represents a TCP close operation.
 #[derive(Debug)]
-pub(crate) struct TcpClose {
+pub struct TcpClose {
     /// The state ID associated with the TCP close operation.
-    pub state_ptr: Ptr<State>,
+    pub(crate) state_ptr: Ptr<State>,
 }
 
 /// The status of the coroutine yield. This is the one way to communicate with the scheduler.

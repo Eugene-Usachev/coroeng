@@ -2,7 +2,7 @@ use std::io::Error;
 use std::os::fd::RawFd;
 use crate::coroutine::YieldStatus;
 use crate::io::State;
-use crate::{spawn_local, spawn_local_move};
+use crate::{spawn_local};
 use crate::utils::{Buffer, Ptr};
 
 pub struct TcpStream {
@@ -56,7 +56,7 @@ impl Drop for TcpStream {
     fn drop(&mut self) {
         let state_ptr = self.data;
         if self.is_registered() {
-            spawn_local_move!({
+            spawn_local!({
                 yield TcpStream::close(state_ptr);
                 unsafe { state_ptr.drop_in_place(); }
             });

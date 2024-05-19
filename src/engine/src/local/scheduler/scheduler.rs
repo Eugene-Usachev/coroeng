@@ -1,10 +1,10 @@
-use std::cell::UnsafeCell;
+use std::cell::{UnsafeCell};
 use std::collections::VecDeque;
 use std::intrinsics::{unlikely};
 use std::mem;
 use std::mem::{MaybeUninit, transmute};
+#[allow(unused_imports)] // compiler will complain if it's not used, but we need it for resume()
 use std::ops::{Coroutine, CoroutineState};
-use std::pin::Pin;
 use std::time::Instant;
 use crate::cfg::{config_selector, SelectorType};
 use crate::coroutine::coroutine::{CoroutineImpl};
@@ -12,6 +12,7 @@ use crate::coroutine::YieldStatus;
 use crate::io::sys::unix::{EpolledSelector, IoUringSelector};
 use crate::io::{Selector, State};
 use crate::net::TcpListener;
+use crate::new_coroutine;
 use crate::sleep::SleepingCoroutine;
 
 thread_local! {
@@ -120,18 +121,18 @@ impl Scheduler {
         }
     }
 
-    pub fn run<Co: Coroutine<Yield = YieldStatus, Return=()> + 'static>(&mut self, main_func: Pin<Box<Co>>) {
+    pub fn run(&mut self, main_func: CoroutineImpl) {
         match config_selector() {
             SelectorType::Poller => self.run_with_selector(main_func, EpolledSelector::new().expect("Failed to create epoll selector")),
             SelectorType::Ring => self.run_with_selector(main_func, IoUringSelector::new()),
         }
     }
 
-    fn run_with_selector<Co: Coroutine<Yield = YieldStatus, Return=()> + 'static, S: Selector + 'static>(&mut self, main_func: Pin<Box<Co>>, mut selector: S) {
+    fn run_with_selector<S: Selector + 'static>(&mut self, main_func: CoroutineImpl, mut selector: S) {
         self.task_queue.push_back(main_func);
         let selector_ref = unsafe { transmute::<&mut S, &'static mut S>(&mut selector) };
 
-        self.sched(Box::pin(#[coroutine] || {
+        self.sched(new_coroutine!({
             let scheduler = local_scheduler();
             loop {
                 scheduler.awake_coroutines();

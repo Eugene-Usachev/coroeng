@@ -3,7 +3,7 @@ use std::io::Error;
 use std::{mem, ptr};
 use std::cell::UnsafeCell;
 use std::os::fd::RawFd;
-use io_uring::{cqueue, IoUring, opcode, squeue, SubmissionQueue, Submitter, types};
+use io_uring::{cqueue, IoUring, opcode, squeue, types};
 use io_uring::types::{SubmitArgs, Timespec};
 use crate::io::{Selector, State};
 use crate::local::Scheduler;
@@ -47,38 +47,39 @@ impl IoUringSelector {
         selector
     }
 
-    #[inline(always)]
-    fn flush(
-        backlog: &mut VecDeque<squeue::Entry>,
-        submitter: &mut Submitter,
-        sq: &mut SubmissionQueue<squeue::Entry>
-    ) {
-        println!("flush len: {}", sq.len());
-        let mut vacant = sq.capacity() - sq.len();
-
-        loop {
-            if vacant == 0 {
-                match submitter.submit() {
-                    Ok(_) => (),
-                    Err(ref err) if err.raw_os_error() == Some(libc::EBUSY) => break,
-                    Err(err) => {
-                        panic!("IoUringSelector: failed to submit: {}", err);
-                    },
-                }
-                vacant = sq.capacity();
-                sq.sync();
-            }
-            match backlog.pop_front() {
-                Some(sqe) => unsafe {
-                    let _ = sq.push(&sqe);
-                    vacant -= 1;
-                },
-                None => break,
-            }
-        }
-
-        sq.sync();
-    }
+    // TODO r?
+    // #[inline(always)]
+    // fn flush(
+    //     backlog: &mut VecDeque<squeue::Entry>,
+    //     submitter: &mut Submitter,
+    //     sq: &mut SubmissionQueue<squeue::Entry>
+    // ) {
+    //     println!("flush len: {}", sq.len());
+    //     let mut vacant = sq.capacity() - sq.len();
+    //
+    //     loop {
+    //         if vacant == 0 {
+    //             match submitter.submit() {
+    //                 Ok(_) => (),
+    //                 Err(ref err) if err.raw_os_error() == Some(libc::EBUSY) => break,
+    //                 Err(err) => {
+    //                     panic!("IoUringSelector: failed to submit: {}", err);
+    //                 },
+    //             }
+    //             vacant = sq.capacity();
+    //             sq.sync();
+    //         }
+    //         match backlog.pop_front() {
+    //             Some(sqe) => unsafe {
+    //                 let _ = sq.push(&sqe);
+    //                 vacant -= 1;
+    //             },
+    //             None => break,
+    //         }
+    //     }
+    //
+    //     sq.sync();
+    // }
 
     fn push_sqe(&mut self, sqe: squeue::Entry) {
         unsafe {

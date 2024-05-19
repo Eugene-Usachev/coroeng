@@ -8,19 +8,18 @@
 /// let res = io_yield!(TcpListener::accept, &mut listener);
 ///
 /// if res.is_err() {
-///     println!("accept failed, reason: {}", res.err().unwrap());
-///     continue;
+///     panic!("accept failed, reason: {}", res.err().unwrap());
 /// }
 ///
 /// let mut stream: TcpStream = res.unwrap();
 /// ```
 #[macro_export]
-macro_rules! io_yield {
+macro_rules! ret_yield {
     ($coroutine:expr) => {
-        {
-            let mut res = unsafe { std::mem::zeroed() };
-            yield $coroutine(&mut res);
-            res
+        unsafe {
+            let mut res = std::mem::MaybeUninit::uninit();
+            yield $coroutine(res.as_mut_ptr());
+            res.assume_init()
         }
     };
 

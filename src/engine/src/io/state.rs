@@ -5,37 +5,37 @@ use crate::coroutine::coroutine::CoroutineImpl;
 use crate::net::tcp::TcpStream;
 use crate::utils::Buffer;
 
-pub(crate) struct EmptyState {
+pub struct EmptyState {
     fd: RawFd
 }
 
-pub(crate) struct AcceptTcpState {
+pub struct AcceptTcpState {
     pub(crate) fd: RawFd,
     pub(crate) coroutine: CoroutineImpl,
     pub(crate) result: *mut Result<TcpStream, Error>
 }
 
-pub(crate) struct PollTcpState {
+pub struct PollTcpState {
     pub(crate) fd: RawFd,
     pub(crate) coroutine: CoroutineImpl,
     pub(crate) result: *mut Result<&'static [u8], Error>
 }
 
-pub(crate) struct ReadTcpState {
+pub struct ReadTcpState {
     pub(crate) fd: RawFd,
     pub(crate) buffer: Buffer,
     pub(crate) coroutine: CoroutineImpl,
     pub(crate) result: *mut Result<&'static [u8], Error>
 }
 
-pub(crate) struct WriteTcpState {
+pub struct WriteTcpState {
     pub(crate) fd: RawFd,
     pub(crate) buffer: Buffer,
     pub(crate) coroutine: CoroutineImpl,
     pub(crate) result: *mut Result<usize, Error>
 }
 
-pub(crate) struct WriteAllTcpState {
+pub struct WriteAllTcpState {
     pub(crate) fd: RawFd,
     pub(crate) buffer: Buffer,
     pub(crate) coroutine: CoroutineImpl,
@@ -43,7 +43,7 @@ pub(crate) struct WriteAllTcpState {
     pub(crate) result: *mut Result<(), Error>
 }
 
-pub(crate) struct CloseTcpState {
+pub struct CloseTcpState {
     pub(crate) fd: RawFd,
     pub(crate) coroutine: CoroutineImpl
 }
