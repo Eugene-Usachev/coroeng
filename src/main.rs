@@ -66,33 +66,116 @@
 //     run_on_all_cores(start_server);
 // }
 
+use std::io::Error;
 use std::mem::MaybeUninit;
 use std::net::ToSocketAddrs;
-use engine::{coro, print_ret, ret_yield, run_on_all_cores, spawn_local, wait};
+use engine::{coro, ret_yield, run_on_all_cores, spawn_local, wait};
+use engine::coroutine::CoroutineImpl;
 use engine::net::{TcpListener, TcpStream};
-use engine::utils::Buffer;
+use engine::utils::{Buffer, buffer};
 
-fn bar(a: usize, res: *mut usize) {
-    if a % 2 == 0 {
-        unsafe { *res = 0; }
-        return;
-    }
-    unsafe { *res = 1; }
+#[coro]
+fn with_ret2(mut stream: TcpStream) -> Result<&'static [u8], Error> {
+    yield stream.read()
 }
 
-#[print_ret]
-fn a(b: usize) -> usize {
-    if b % 2 == 0 {
-        return 0;
-    }
-    1
-}
+#[coro]
+fn with_ret(mut stream: TcpStream) -> Result<&'static [u8], Error> {
+    let r = (yield stream.write(buffer()))?;
 
-// #[coro]
-// fn with_ret(mut stream: TcpStream) -> usize {
-//     let slice = ret_yield!(TcpStream::read, &mut stream).unwrap();
-//     return slice.len();
-// }
+    // while 0 < (yield stream.write(buffer())).unwrap() {
+    //     let r = yield stream.read();
+    //     if r.is_err() {
+    //         return r;
+    //     }
+    // }
+    //
+    // loop {
+    //     let r = yield stream.read();
+    //     if r.is_err() {
+    //         return r;
+    //     }
+    // }
+
+    // let s = [0, 2, 3];
+    // let r = s[yield stream.write(buffer())];
+
+    // for i in 0..(yield stream.write(buffer())).unwrap() {
+    //     let r = yield stream.read();
+    // }
+
+    // let r = unsafe {
+    //     yield stream.read()
+    // };
+
+    //let r = *(yield stream.read());
+
+    //let r = [(yield stream.write(buffer())).unwrap(); 10];
+
+    // struct A {
+    //     res: Result<&'static [u8], Error>
+    // }
+    // let a = A {
+    //     res: yield stream.read()
+    // };
+    // let r = a.res;
+
+    //let r = (yield stream.read()) as Result<&'static [u8], Error>;
+
+    //let r = [yield stream.read(), yield stream.read()];
+
+    //let res = yield stream.write(yield stream.read());
+
+    // struct a {
+    //     cor: CoroutineImpl
+    // }
+    // let mut res = std::mem::MaybeUninit::uninit();
+    // let aa = a {
+    //     cor: with_ret2(stream, res.as_mut_ptr())
+    // };
+    //
+    // let r = yield aa.cor();
+
+    //let r = yield aa.cor;
+
+    //let r = &(yield stream.read()).unwrap();
+
+    //let r = ((yield stream.write(buffer())).unwrap(), (yield stream.write(buffer())).unwrap());
+
+    //let r = ((yield stream.write(buffer())).unwrap() + (yield stream.write(buffer())).unwrap());
+
+    //let r = (yield stream.write(buffer())).unwrap();
+
+    // match yield stream.read() {
+    //     Ok(slice) => {
+    //         let mut buf = buffer();
+    //         buf.append(slice);
+    //         yield stream.write_all(buf);
+    //     }
+    //     Err(err) => {
+    //         return yield stream.read();
+    //     }
+    // };
+
+    // let res = yield stream.read();
+    // let res;
+    // res = yield stream.read();
+
+    // if yield stream.read() {
+    //     let res = yield stream.read();
+    // } else {
+    //     let buf = buffer();
+    //     let res = yield stream.write_all(buf);
+    // }
+
+    // // without ret
+    // yield stream.read();
+    //
+    // // with ret
+    // yield stream.read()
+
+    // return yield stream.read();
+}
 
 // #[coro]
 // fn difficult_write(mut stream: TcpStream, buf: Buffer) {
@@ -107,7 +190,7 @@ fn a(b: usize) -> usize {
 //     let mut buf = engine::utils::buffer();
 //     buf.append("hello".as_bytes());
 //
-//     // Here we need to wait for difficult_write to finish
+//     // Here we need to wait to avoid dropping the stream before the coroutine is finished.
 //     wait!(difficult_write(stream, buf));
 // }
 //
@@ -121,5 +204,5 @@ fn a(b: usize) -> usize {
 // }
 
 fn main() {
-    run_on_all_cores(with_ret);
+    a();
 }

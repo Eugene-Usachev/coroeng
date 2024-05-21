@@ -3,101 +3,366 @@
 #![feature(stmt_expr_attributes)]
 extern crate proc_macro;
 use proc_macro::TokenStream;
-use quote::quote;
-use syn::{parse_macro_input, ItemFn, ReturnType, Expr, Stmt};
-use syn::visit_mut::{self, VisitMut};
+use std::ops::DerefMut;
+use quote::{quote, ToTokens};
+use syn::{parse_macro_input, ItemFn, ReturnType, Expr, Stmt, Block};
+use proc_macro2;
+use syn::token::Semi;
 
-#[proc_macro_attribute]
-pub fn print_ret(_: TokenStream, input: TokenStream) -> TokenStream {
-    // Parse the input tokens into a syntax tree
-    let input_fn = parse_macro_input!(input as ItemFn);
+fn transform_function_yield(block: &mut Block) {
+    /// Here we get expr like `yield stream.read()`
+    /// and transform it to
+    /// ```ignore
+    /// unsafe {
+    ///     let res = std::mem::MaybeUninit::uninit();
+    ///     yield stream.read(res.as_mut_ptr());
+    ///     res.assume_init()
+    /// }
+    /// ```
+    fn transform_expr(expr: &mut Expr, semi: Option<Semi>) {
+        match expr {
+            Expr::Yield(yield_ex) => {
+                #[allow(unused_doc_comments)]
+                let mut new_yield_ex = yield_ex.clone().expr.expect("empty yield expression");
+                match new_yield_ex.deref_mut() {
+                    Expr::Call(call_ex) => {
+                        for arg in &mut call_ex.args {
+                            transform_expr(arg, None);
+                        }
+                        call_ex.args.push(syn::parse_quote!(res.as_mut_ptr()));
+                    },
+                    Expr::MethodCall(method_call_ex) => {
+                        for arg in &mut method_call_ex.args {
+                            transform_expr(arg, None);
+                        }
+                        method_call_ex.args.push(syn::parse_quote!(res.as_mut_ptr()));
+                    },
+                    _ => panic!("yield expression must call a function or call a method"),
+                }
 
-    // Get the identifier of the function
-    let fn_name = &input_fn.sig.ident;
-
-    // Get the statements inside the function body
-    let fn_body = &input_fn.block.stmts;
-
-    // Generate new statements with println! before each return statement
-    let mut new_fn_body = Vec::new();
-    for stmt in fn_body {
-        match stmt {
-            Stmt::Expr(expr, _) => {
-                if let Expr::Return(expr) = expr {
-                    new_fn_body.push(quote! {
-                        println!("{}", #expr);
-                        #stmt
-                    });
-                } else {
-                    new_fn_body.push(quote! {
-                        #stmt
-                    });
+                yield_ex.expr = Some(new_yield_ex);
+                let new_expr = syn::parse_quote!(
+                    unsafe {
+                        let res = std::mem::MaybeUninit::uninit();
+                        #yield_ex;
+                        res.assume_init()#semi
+                    }
+                );
+                *expr = new_expr;
+            }
+            Expr::Let(let_ex) => {
+                transform_expr(let_ex.expr.deref_mut(), None);
+            }
+            Expr::Assign(assign_ex) => {
+                let right = &mut assign_ex.right;
+                transform_expr(right, None);
+            }
+            Expr::If(if_ex) => {
+                transform_expr(if_ex.cond.deref_mut(), None);
+                transform_function_yield(&mut if_ex.then_branch);
+                if let Some(ref mut else_branch) = if_ex.else_branch {
+                    transform_expr(else_branch.1.deref_mut(), None);
                 }
             }
-            _ => new_fn_body.push(quote! {
-                #stmt
-            }),
+            Expr::Block(ref mut block_ex) => {
+                transform_function_yield(&mut block_ex.block);
+            }
+            Expr::Return(ret_ex) => {
+                if let Some(ref mut expr) = ret_ex.expr {
+                    transform_expr(expr, None);
+                }
+            }
+            Expr::Match(match_ex) => {
+                transform_expr(match_ex.expr.deref_mut(), None);
+                for arm in &mut match_ex.arms {
+                    transform_expr(arm.body.deref_mut(), None);
+                }
+            }
+            Expr::Lit(_lit_ex) => {
+                // doesn't contain `yield`
+            }
+            Expr::Paren(paren_ex) => {
+                transform_expr(paren_ex.expr.deref_mut(), None);
+            }
+            Expr::Tuple(tuple_ex) => {
+                for mut elem in &mut tuple_ex.elems {
+                    transform_expr(elem.deref_mut(), None);
+                }
+            }
+            Expr::Reference(ref_ex) => {
+                transform_expr(ref_ex.expr.deref_mut(), None);
+            }
+            Expr::Closure(_closure_ex) => {
+                // closure must not have yield, so we don't need to transform it
+            }
+            Expr::Field(field_ex) => {
+                transform_expr(field_ex.base.deref_mut(), None);
+            }
+            Expr::MethodCall(method_call_ex) => {
+                transform_expr(method_call_ex.receiver.deref_mut(), None);
+                for arg in &mut method_call_ex.args {
+                    transform_expr(arg, None);
+                }
+            }
+            Expr::Call(call_ex) => {
+                transform_expr(call_ex.func.deref_mut(), None);
+                for arg in &mut call_ex.args {
+                    transform_expr(arg, None);
+                }
+            }
+            Expr::Array(array_ex) => {
+                for mut elem in &mut array_ex.elems {
+                    transform_expr(elem.deref_mut(), None);
+                }
+            }
+            Expr::Cast(cast_ex) => {
+                transform_expr(cast_ex.expr.deref_mut(), None);
+            }
+            Expr::Struct(struct_ex) => {
+                // we needn't transform qself, because it doesn't contain yield
+
+                // Do we need rest?
+                if let Some(ref mut rest) = struct_ex.rest {
+                    transform_expr(rest.deref_mut(), None);
+                }
+                for mut field in &mut struct_ex.fields {
+                    transform_expr(&mut field.expr, None);
+                }
+            }
+            Expr::Repeat(repeat_ex) => {
+                transform_expr(repeat_ex.expr.deref_mut(), None);
+                transform_expr(repeat_ex.len.deref_mut(), None);
+            }
+            Expr::Unary(unary_ex) => {
+                transform_expr(unary_ex.expr.deref_mut(), None);
+            }
+            Expr::Binary(binary_ex) => {
+                transform_expr(binary_ex.right.deref_mut(), None);
+                transform_expr(binary_ex.left.deref_mut(), None);
+            }
+            Expr::Unsafe(unsafe_ex) => {
+                transform_function_yield(&mut unsafe_ex.block);
+            }
+            Expr::ForLoop(for_loop_ex) => {
+                transform_expr(for_loop_ex.expr.deref_mut(), None);
+                transform_function_yield(&mut for_loop_ex.body);
+            }
+            Expr::Index(index_ex) => {
+                transform_expr(index_ex.expr.deref_mut(), None);
+                transform_expr(index_ex.index.deref_mut(), None);
+            }
+            Expr::Loop(loop_ex) => {
+                transform_function_yield(&mut loop_ex.body);
+            }
+            Expr::TryBlock(try_block_ex) => {
+                transform_function_yield(&mut try_block_ex.block);
+            }
+            Expr::While(while_ex) => {
+                transform_expr(while_ex.cond.deref_mut(), None);
+                transform_function_yield(&mut while_ex.body);
+            }
+            Expr::Range(range_ex) => {
+                if let Some(ref mut end) = range_ex.end {
+                    transform_expr(end, None);
+                }
+                if let Some(ref mut start) = range_ex.start {
+                    transform_expr(start, None);
+                }
+            }
+            Expr::Try(_try_ex) => {
+                panic!("macro coro does not support try-expressions (?) yet");
+            }
+            _ => {},
         }
     }
 
-    // Reconstruct the function with modified body
-    let output = quote! {
-        fn #fn_name() {
-            #(#new_fn_body)*
+    for stmt in &mut block.stmts {
+        match stmt {
+            Stmt::Expr(expr, semi) => {
+                transform_expr(expr, semi.clone());
+            }
+            Stmt::Local(local) => {
+                if let Some(expr) = &mut local.init {
+                    transform_expr(expr.expr.deref_mut(), None);
+                }
+            }
+            _ => {},
         }
-    };
-
-    // Return the generated code as a TokenStream
-    output.into()
+    }
 }
 
-/// This macro is used to convert function into a coroutine creator.
+fn transform_function_return(block: &mut Block, level: usize) {
+    fn transform_expr(expr: &mut Expr, semi: Option<Semi>, level: usize) {
+        match expr {
+            // TODO Try and range
+            Expr::If(if_ex) => {
+                transform_function_return(&mut if_ex.then_branch, level);
+                if let Some(else_branch) = &mut if_ex.else_branch {
+                    transform_expr(&mut else_branch.1, None, level);
+                }
+            }
+            Expr::Block(ref mut block_ex) => {
+                transform_function_return(&mut block_ex.block, level);
+            }
+            Expr::Return(ret_ex) => {
+                let ret_expr = ret_ex.clone().expr.unwrap();
+                let new_expr: Expr = syn::parse_quote!(
+                    {
+                        unsafe { *res = #ret_expr; }
+                        return;
+                    }
+                );
+                *expr = new_expr;
+            }
+            Expr::Match(match_ex) => {
+                for arm in &mut match_ex.arms {
+                    transform_expr(&mut arm.body, None, level + 1);
+                }
+                if level == 1 && semi.is_none() {
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #match_ex; return;});
+                    *expr = new_expr;
+                }
+            }
+            Expr::Lit(lit_ex) => {
+                if level == 1 && semi.is_none() {
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #lit_ex; return;});
+                    *expr = new_expr;
+                }
+            }
+            Expr::Paren(paren_ex) => {
+                if level == 1 && semi.is_none() {
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #paren_ex; return;});
+                    *expr = new_expr;
+                }
+            }
+            Expr::Tuple(tuple_ex) => {
+                if level == 1 && semi.is_none() {
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #tuple_ex; return;});
+                    *expr = new_expr;
+                }
+            }
+            Expr::Reference(ref_ex) => {
+                if level == 1 && semi.is_none() {
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #ref_ex; return;});
+                    *expr = new_expr;
+                }
+            }
+            Expr::Closure(closure_ex) => {
+                if level == 1 && semi.is_none() {
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #closure_ex; return;});
+                    *expr = new_expr;
+                }
+            }
+            Expr::Field(field_ex) => {
+                if level == 1 && semi.is_none() {
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #field_ex; return;});
+                    *expr = new_expr;
+                }
+            }
+            Expr::MethodCall(method_call_ex) => {
+                if level == 1 && semi.is_none() {
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #method_call_ex; return;});
+                    *expr = new_expr;
+                }
+            }
+            Expr::Call(call_ex) => {
+                if level == 1 && semi.is_none() {
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #call_ex; return;});
+                    *expr = new_expr;
+                }
+            }
+            Expr::Array(array_ex) => {
+                if level == 1 && semi.is_none() {
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #array_ex; return;});
+                    *expr = new_expr;
+                }
+            }
+            Expr::Cast(cast_ex) => {
+                if level == 1 && semi.is_none() {
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #cast_ex; return;});
+                    *expr = new_expr;
+                }
+            }
+            Expr::Struct(struct_ex) => {
+                if level == 1 && semi.is_none() {
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #struct_ex; return;});
+                    *expr = new_expr;
+                }
+            }
+            Expr::Repeat(repeat_ex) => {
+                if level == 1 && semi.is_none() {
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #repeat_ex; return;});
+                    *expr = new_expr;
+                }
+            }
+            Expr::Unary(unary_ex) => {
+                if level == 1 && semi.is_none() {
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #unary_ex; return;});
+                    *expr = new_expr;
+                }
+            }
+            Expr::Binary(binary_ex) => {
+                if level == 1 && semi.is_none() {
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #binary_ex; return;});
+                    *expr = new_expr;
+                }
+            }
+            Expr::Unsafe(unsafe_ex) => {
+                transform_function_return(&mut unsafe_ex.block, level);
+            }
+            Expr::Yield(yield_ex) => {
+                if level == 1 && semi.is_none() {
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #yield_ex; return;});
+                    *expr = new_expr;
+                }
+            }
+            Expr::Loop(loop_ex) => {
+                transform_function_return(&mut loop_ex.body, level);
+            }
+            Expr::ForLoop(for_loop_ex) => {
+                transform_function_return(&mut for_loop_ex.body, level);
+            }
+            Expr::While(while_ex) => {
+                transform_function_return(&mut while_ex.body, level);
+            }
+            Expr::TryBlock(try_block_ex) => {
+                transform_function_return(&mut try_block_ex.block, level);
+            }
+            Expr::Range(range_ex) => {
+                if level == 1 && semi.is_none() {
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #range_ex; return;});
+                    *expr = new_expr;
+                }
+            }
+            Expr::Try(_try_ex) => {
+                panic!("macro coro does not support try-expressions (?) yet");
+            }
+            _ => {},
+        }
+    }
+
+    for stmt in &mut block.stmts {
+        match stmt {
+            Stmt::Expr(expr, semi) => {
+                transform_expr(expr, semi.clone(), level);
+            }
+            Stmt::Local(local) => {
+                if let Some(ref mut expr) = local.init {
+                    transform_expr(&mut expr.expr, None, 1000);
+                }
+            }
+            _ => {},
+        }
+    }
+}
+
+/// # Safety
 ///
-/// # Example
+/// This macro will panic if the block of code has try-expressions (?).
 ///
-/// ```rust
-/// use engine::net::tcp::{TcpStream, TcpListener};
-/// use engine::utils::{io_yield, run_on_all_cores, spawn_local, coro};
-///
-/// #[coro]
-/// fn handle_tcp_client(mut stream: TcpStream) {
-///     loop {
-///         let slice = io_yield!(TcpStream::read, &mut stream).unwrap();
-///
-///         if slice.is_empty() {
-///             break;
-///         }
-///
-///         let mut buf = engine::utils::buffer();
-///         buf.append(slice);
-///
-///         let res = io_yield!(TcpStream::write_all, &mut stream, buf);
-///
-///         if res.is_err() {
-///             println!("write failed, reason: {}", res.err().unwrap());
-///             break;
-///         }
-///     }
-/// }
-///
-/// fn main() {
-///     run_on_all_cores!({
-///         let mut listener = io_yield!(TcpListener::new, "localhost:8081".to_socket_addrs().unwrap().next().unwrap());
-///         loop {
-///             let stream_ = io_yield!(TcpListener::accept, &mut listener);
-///
-///             if stream_.is_err() {
-///                 println!("accept failed, reason: {}", stream_.err().unwrap());
-///                 continue;
-///             }
-///
-///             let stream: TcpStream = stream_.unwrap();
-///             spawn_local!(handle_tcp_client(stream));
-///         }
-///     });
-/// }
-/// ```
-///
+/// And please use `return` keyword to return.
+/// I tried to add a support of the implicit return, but I don't sure that I process all cases correctly.
+/// But you always can try, in the worst case it just will not compile.
 #[proc_macro_attribute]
 pub fn coro(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let mut input = parse_macro_input!(item as ItemFn);
@@ -107,65 +372,34 @@ pub fn coro(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let fn_vis = &input.vis;
     let fn_generics = &input.sig.generics;
     let fn_return_type = &input.sig.output;
+    let fn_where_clause = &input.sig.generics.where_clause;
+    let mut fn_block = &mut input.block;
 
-    let has_return_type = match fn_return_type {
-        ReturnType::Default => false,
-        ReturnType::Type(_, _) => true,
+    transform_function_yield(&mut fn_block);
+
+    let fn_args =  match fn_return_type {
+        ReturnType::Type(_, t) => {
+            transform_function_return(&mut fn_block, 1);
+            quote! {
+                #fn_args, res: *mut #t
+            }
+        },
+        ReturnType::Default => {
+            quote! {
+                #fn_args
+            }
+        },
     };
 
     let expanded;
-    if !has_return_type {
-        let fn_block = &input.block;
-        expanded = quote! {
-            #[inline(always)]
-            #fn_vis fn #fn_name<#fn_generics>(#fn_args) -> engine::coroutine::CoroutineImpl {
-                std::boxed::Box::pin(#[coroutine] static move || {
-                    #fn_block
-                })
-            }
-        };
-    } else {
-        if has_return_type {
-            // Create a mutable visitor to transform return statements
-            struct ReturnReplacer;
-
-            impl VisitMut for ReturnReplacer {
-                fn visit_expr_mut(&mut self, node: &mut Expr) {
-                    if let Expr::Return(ret_expr) = node {
-                        let new_expr = match &ret_expr.expr {
-                            Some(expr) => quote! {
-                                *res = #expr;
-                                return;
-
-                            },
-                            None => quote! {
-                                *res = ();
-                                return;
-                            },
-                        };
-
-                        *node = syn::parse2(new_expr).expect("12");
-                    }
-                    // Continue visiting the rest of the tree
-                    visit_mut::visit_expr_mut(self, node);
-                }
-            }
-
-            // Apply the visitor to the function block
-            let mut visitor = ReturnReplacer;
-            visitor.visit_block_mut(&mut input.block);
+    expanded = quote! {
+        #[inline(always)]
+        #fn_vis fn #fn_name #fn_generics (#fn_args) #fn_where_clause -> engine::coroutine::CoroutineImpl {
+            std::boxed::Box::pin(#[coroutine] static move || {
+                #fn_block
+            })
         }
-        let fn_block = &input.block;
-
-        expanded = quote! {
-            #[inline(always)]
-            #fn_vis fn #fn_name<#fn_generics>(#fn_args, res: *mut #fn_return_type) -> engine::coroutine::CoroutineImpl {
-                std::boxed::Box::pin(#[coroutine] static move || {
-                    #fn_block
-                })
-            }
-        }
-    }
+    };
 
     TokenStream::from(expanded)
 }
