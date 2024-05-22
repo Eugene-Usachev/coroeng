@@ -4,9 +4,8 @@
 extern crate proc_macro;
 use proc_macro::TokenStream;
 use std::ops::DerefMut;
-use quote::{quote, ToTokens};
+use quote::{quote};
 use syn::{parse_macro_input, ItemFn, ReturnType, Expr, Stmt, Block};
-use proc_macro2;
 use syn::token::Semi;
 
 fn transform_function_yield(block: &mut Block) {
@@ -14,28 +13,27 @@ fn transform_function_yield(block: &mut Block) {
     /// and transform it to
     /// ```ignore
     /// unsafe {
-    ///     let res = std::mem::MaybeUninit::uninit();
-    ///     yield stream.read(res.as_mut_ptr());
-    ///     res.assume_init()
+    ///     let coroutine_result_DONT_NAME_YOUR_VARIABLE_AS_IT = std::mem::MaybeUninit::uninit();
+    ///     yield stream.read(coroutine_result_DONT_NAME_YOUR_VARIABLE_AS_IT.as_mut_ptr());
+    ///     coroutine_result_DONT_NAME_YOUR_VARIABLE_AS_IT.assume_init()
     /// }
     /// ```
     fn transform_expr(expr: &mut Expr, semi: Option<Semi>) {
         match expr {
             Expr::Yield(yield_ex) => {
-                #[allow(unused_doc_comments)]
                 let mut new_yield_ex = yield_ex.clone().expr.expect("empty yield expression");
                 match new_yield_ex.deref_mut() {
                     Expr::Call(call_ex) => {
                         for arg in &mut call_ex.args {
                             transform_expr(arg, None);
                         }
-                        call_ex.args.push(syn::parse_quote!(res.as_mut_ptr()));
+                        call_ex.args.push(syn::parse_quote!(coroutine_result_DONT_NAME_YOUR_VARIABLE_AS_IT.as_mut_ptr()));
                     },
                     Expr::MethodCall(method_call_ex) => {
                         for arg in &mut method_call_ex.args {
                             transform_expr(arg, None);
                         }
-                        method_call_ex.args.push(syn::parse_quote!(res.as_mut_ptr()));
+                        method_call_ex.args.push(syn::parse_quote!(coroutine_result_DONT_NAME_YOUR_VARIABLE_AS_IT.as_mut_ptr()));
                     },
                     _ => panic!("yield expression must call a function or call a method"),
                 }
@@ -43,9 +41,9 @@ fn transform_function_yield(block: &mut Block) {
                 yield_ex.expr = Some(new_yield_ex);
                 let new_expr = syn::parse_quote!(
                     unsafe {
-                        let res = std::mem::MaybeUninit::uninit();
+                        let mut coroutine_result_DONT_NAME_YOUR_VARIABLE_AS_IT = std::mem::MaybeUninit::uninit();
                         #yield_ex;
-                        res.assume_init()#semi
+                        coroutine_result_DONT_NAME_YOUR_VARIABLE_AS_IT.assume_init()#semi
                     }
                 );
                 *expr = new_expr;
@@ -64,7 +62,7 @@ fn transform_function_yield(block: &mut Block) {
                     transform_expr(else_branch.1.deref_mut(), None);
                 }
             }
-            Expr::Block(ref mut block_ex) => {
+            Expr::Block(block_ex) => {
                 transform_function_yield(&mut block_ex.block);
             }
             Expr::Return(ret_ex) => {
@@ -105,10 +103,9 @@ fn transform_function_yield(block: &mut Block) {
                 }
             }
             Expr::Call(call_ex) => {
-                transform_expr(call_ex.func.deref_mut(), None);
                 for arg in &mut call_ex.args {
-                    transform_expr(arg, None);
-                }
+                transform_expr(arg, None);
+            }
             }
             Expr::Array(array_ex) => {
                 for mut elem in &mut array_ex.elems {
@@ -125,7 +122,7 @@ fn transform_function_yield(block: &mut Block) {
                 if let Some(ref mut rest) = struct_ex.rest {
                     transform_expr(rest.deref_mut(), None);
                 }
-                for mut field in &mut struct_ex.fields {
+                for field in &mut struct_ex.fields {
                     transform_expr(&mut field.expr, None);
                 }
             }
@@ -208,7 +205,7 @@ fn transform_function_return(block: &mut Block, level: usize) {
                 let ret_expr = ret_ex.clone().expr.unwrap();
                 let new_expr: Expr = syn::parse_quote!(
                     {
-                        unsafe { *res = #ret_expr; }
+                        unsafe { *coroutine_argument_DONT_NAME_YOUR_VARIABLE_AS_IT = #ret_expr; }
                         return;
                     }
                 );
@@ -219,91 +216,91 @@ fn transform_function_return(block: &mut Block, level: usize) {
                     transform_expr(&mut arm.body, None, level + 1);
                 }
                 if level == 1 && semi.is_none() {
-                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #match_ex; return;});
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *coroutine_argument_DONT_NAME_YOUR_VARIABLE_AS_IT = #match_ex; return;});
                     *expr = new_expr;
                 }
             }
             Expr::Lit(lit_ex) => {
                 if level == 1 && semi.is_none() {
-                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #lit_ex; return;});
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *coroutine_argument_DONT_NAME_YOUR_VARIABLE_AS_IT = #lit_ex; return;});
                     *expr = new_expr;
                 }
             }
             Expr::Paren(paren_ex) => {
                 if level == 1 && semi.is_none() {
-                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #paren_ex; return;});
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *coroutine_argument_DONT_NAME_YOUR_VARIABLE_AS_IT = #paren_ex; return;});
                     *expr = new_expr;
                 }
             }
             Expr::Tuple(tuple_ex) => {
                 if level == 1 && semi.is_none() {
-                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #tuple_ex; return;});
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *coroutine_argument_DONT_NAME_YOUR_VARIABLE_AS_IT = #tuple_ex; return;});
                     *expr = new_expr;
                 }
             }
             Expr::Reference(ref_ex) => {
                 if level == 1 && semi.is_none() {
-                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #ref_ex; return;});
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *coroutine_argument_DONT_NAME_YOUR_VARIABLE_AS_IT = #ref_ex; return;});
                     *expr = new_expr;
                 }
             }
             Expr::Closure(closure_ex) => {
                 if level == 1 && semi.is_none() {
-                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #closure_ex; return;});
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *coroutine_argument_DONT_NAME_YOUR_VARIABLE_AS_IT = #closure_ex; return;});
                     *expr = new_expr;
                 }
             }
             Expr::Field(field_ex) => {
                 if level == 1 && semi.is_none() {
-                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #field_ex; return;});
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *coroutine_argument_DONT_NAME_YOUR_VARIABLE_AS_IT = #field_ex; return;});
                     *expr = new_expr;
                 }
             }
             Expr::MethodCall(method_call_ex) => {
                 if level == 1 && semi.is_none() {
-                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #method_call_ex; return;});
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *coroutine_argument_DONT_NAME_YOUR_VARIABLE_AS_IT = #method_call_ex; return;});
                     *expr = new_expr;
                 }
             }
             Expr::Call(call_ex) => {
                 if level == 1 && semi.is_none() {
-                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #call_ex; return;});
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *coroutine_argument_DONT_NAME_YOUR_VARIABLE_AS_IT = #call_ex; return;});
                     *expr = new_expr;
                 }
             }
             Expr::Array(array_ex) => {
                 if level == 1 && semi.is_none() {
-                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #array_ex; return;});
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *coroutine_argument_DONT_NAME_YOUR_VARIABLE_AS_IT = #array_ex; return;});
                     *expr = new_expr;
                 }
             }
             Expr::Cast(cast_ex) => {
                 if level == 1 && semi.is_none() {
-                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #cast_ex; return;});
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *coroutine_argument_DONT_NAME_YOUR_VARIABLE_AS_IT = #cast_ex; return;});
                     *expr = new_expr;
                 }
             }
             Expr::Struct(struct_ex) => {
                 if level == 1 && semi.is_none() {
-                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #struct_ex; return;});
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *coroutine_argument_DONT_NAME_YOUR_VARIABLE_AS_IT = #struct_ex; return;});
                     *expr = new_expr;
                 }
             }
             Expr::Repeat(repeat_ex) => {
                 if level == 1 && semi.is_none() {
-                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #repeat_ex; return;});
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *coroutine_argument_DONT_NAME_YOUR_VARIABLE_AS_IT = #repeat_ex; return;});
                     *expr = new_expr;
                 }
             }
             Expr::Unary(unary_ex) => {
                 if level == 1 && semi.is_none() {
-                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #unary_ex; return;});
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *coroutine_argument_DONT_NAME_YOUR_VARIABLE_AS_IT = #unary_ex; return;});
                     *expr = new_expr;
                 }
             }
             Expr::Binary(binary_ex) => {
                 if level == 1 && semi.is_none() {
-                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #binary_ex; return;});
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *coroutine_argument_DONT_NAME_YOUR_VARIABLE_AS_IT = #binary_ex; return;});
                     *expr = new_expr;
                 }
             }
@@ -312,7 +309,7 @@ fn transform_function_return(block: &mut Block, level: usize) {
             }
             Expr::Yield(yield_ex) => {
                 if level == 1 && semi.is_none() {
-                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #yield_ex; return;});
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *coroutine_argument_DONT_NAME_YOUR_VARIABLE_AS_IT = #yield_ex; return;});
                     *expr = new_expr;
                 }
             }
@@ -330,7 +327,7 @@ fn transform_function_return(block: &mut Block, level: usize) {
             }
             Expr::Range(range_ex) => {
                 if level == 1 && semi.is_none() {
-                    let new_expr: Expr = syn::parse_quote!(unsafe { *res = #range_ex; return;});
+                    let new_expr: Expr = syn::parse_quote!(unsafe { *coroutine_argument_DONT_NAME_YOUR_VARIABLE_AS_IT = #range_ex; return;});
                     *expr = new_expr;
                 }
             }
@@ -356,12 +353,35 @@ fn transform_function_return(block: &mut Block, level: usize) {
     }
 }
 
+/// A macro that converts a function into a coroutine creator.
+/// In general, we can say that this macro allows the user to write coroutine creators as "usual" functions.
+///
+/// # Differences coroutine creators from the "usual" functions
+///
+/// - You can't use try-expressions (?).
+/// - You can't use `yield` in the arguments of the macros.
+/// - It is better to use `return` keyword instead of implicit return.
+/// - These functions are not async.
+/// - These functions always returns [`CoroutineImpl`].
+///
+/// # What this macro does
+///
+/// - Converts a function into a coroutine creator.
+/// - Hide from the user returning via pointers.
+/// - Allows the user use statement `yield expr` and hide from the user works with pointers.
+///
+/// # Limitations
+///
+/// You can't use `yield` in the arguments of the macros, and you can't use try-expressions (?).
+///
 /// # Safety
 ///
-/// This macro will panic if the block of code has try-expressions (?).
+/// This macro will panic if the block of code has try-expressions (?) or any all errors.
 ///
-/// And please use `return` keyword to return.
+/// # About implicit return
+///
 /// I tried to add a support of the implicit return, but I don't sure that I process all cases correctly.
+/// In my tests, it works well with literals, matches, if statements, calls methods and functions, blocks of code and unsafe blocks.
 /// But you always can try, in the worst case it just will not compile.
 #[proc_macro_attribute]
 pub fn coro(_attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -377,16 +397,28 @@ pub fn coro(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     transform_function_yield(&mut fn_block);
 
-    let fn_args =  match fn_return_type {
+    let fn_args = match fn_return_type {
         ReturnType::Type(_, t) => {
             transform_function_return(&mut fn_block, 1);
-            quote! {
-                #fn_args, res: *mut #t
+            if fn_args.len() > 0 {
+                quote! {
+                    #fn_args, coroutine_argument_DONT_NAME_YOUR_VARIABLE_AS_IT: *mut #t
+                }
+            } else {
+                quote! {
+                    coroutine_argument_DONT_NAME_YOUR_VARIABLE_AS_IT: *mut #t
+                }
             }
         },
         ReturnType::Default => {
-            quote! {
-                #fn_args
+            if fn_args.len() > 0 {
+                quote! {
+                    #fn_args, coroutine_argument_DONT_NAME_YOUR_VARIABLE_AS_IT: *mut ()
+                }
+            } else {
+                quote! {
+                    coroutine_argument_DONT_NAME_YOUR_VARIABLE_AS_IT: *mut ()
+                }
             }
         },
     };
@@ -402,4 +434,63 @@ pub fn coro(_attr: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     TokenStream::from(expanded)
+}
+
+#[proc_macro]
+pub fn wait(input: TokenStream) -> TokenStream {
+    let input_expr = parse_macro_input!(input as Expr);
+
+    let modified_expr = match input_expr {
+        Expr::Call(mut call_expr) => {
+            call_expr.args.push(syn::parse_quote!(coroutine_result_DONT_NAME_YOUR_VARIABLE_AS_IT.as_mut_ptr()));
+            Expr::Call(call_expr)
+        }
+        Expr::MethodCall(mut method_call_expr) => {
+            method_call_expr.args.push(syn::parse_quote!(coroutine_result_DONT_NAME_YOUR_VARIABLE_AS_IT.as_mut_ptr()));
+            Expr::MethodCall(method_call_expr)
+        }
+        _ => panic!("The macro only supports function or method calls"),
+    };
+
+    let block = quote! {
+        unsafe {
+            let mut coroutine_result_DONT_NAME_YOUR_VARIABLE_AS_IT = std::mem::MaybeUninit::uninit();
+            let mut coroutine = #modified_expr;
+            loop {
+                match coroutine.as_mut().resume(()) {
+                    std::ops::CoroutineState::Yielded(state) => {
+                        yield state;
+                    },
+                    std::ops::CoroutineState::Complete(res) => break res,
+                }
+            }
+            coroutine_result_DONT_NAME_YOUR_VARIABLE_AS_IT.assume_init()
+        }
+    };
+
+    TokenStream::from(block)
+}
+
+#[proc_macro]
+pub fn spawn_local(input: TokenStream) -> TokenStream {
+    let input_expr = parse_macro_input!(input as Expr);
+
+    let modified_expr = match input_expr {
+        // TODO: think about. Maybe we need to hande expr, that is a CoroutineImpl?
+        Expr::Call(mut call_expr) => {
+            call_expr.args.push(syn::parse_quote!(std::ptr::null_mut()));
+            Expr::Call(call_expr)
+        }
+        Expr::MethodCall(mut method_call_expr) => {
+            method_call_expr.args.push(syn::parse_quote!(std::ptr::null_mut()));
+            Expr::MethodCall(method_call_expr)
+        }
+        _ => panic!("The macro only supports function or method calls"),
+    };
+
+    let block = quote! {
+        engine::local_scheduler().sched(#modified_expr);
+    };
+
+    TokenStream::from(block)
 }

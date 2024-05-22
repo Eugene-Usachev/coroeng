@@ -1,8 +1,9 @@
 use std::io::Error;
 use std::os::fd::RawFd;
-use crate::coroutine::YieldStatus;
+use proc::coro;
+use crate::coroutine::{CoroutineImpl, YieldStatus};
 use crate::io::State;
-use crate::{spawn_local};
+use crate::{local_scheduler, spawn_local};
 use crate::utils::{Buffer, Ptr};
 
 pub struct TcpStream {
@@ -52,14 +53,18 @@ impl TcpStream {
     }
 }
 
+fn close_stream(state_ref: Ptr<State>) -> CoroutineImpl {
+    Box::pin(#[coroutine] static move || {
+        yield TcpStream::close(state_ref);
+        unsafe { state_ref.drop_in_place(); }
+    })
+}
+
 impl Drop for TcpStream {
     fn drop(&mut self) {
         let state_ptr = self.data;
         if self.is_registered() {
-            spawn_local!({
-                yield TcpStream::close(state_ptr);
-                unsafe { state_ptr.drop_in_place(); }
-            });
+            local_scheduler().sched(close_stream(state_ptr));
         } else {
             unsafe { state_ptr.drop_in_place(); }
         }

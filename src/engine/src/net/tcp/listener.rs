@@ -1,11 +1,12 @@
 use std::io::Error;
 use std::net::{SocketAddr};
 use std::os::fd::{IntoRawFd, RawFd};
-use crate::coroutine::YieldStatus;
+use proc::coro;
+use crate::coroutine::{CoroutineImpl, YieldStatus};
 use crate::io::sys::unix::epoll::net::get_tcp_listener_fd;
 use crate::net::tcp::TcpStream;
 use crate::io::State;
-use crate::{spawn_local};
+use crate::{local_scheduler, spawn_local};
 use crate::utils::Ptr;
 
 /// A TCP socket server, listening for connections.
@@ -139,14 +140,18 @@ impl TcpListener {
     }
 }
 
+fn close_listener(state_ptr: Ptr<State>) -> CoroutineImpl {
+    Box::pin(#[coroutine] static move || {
+        yield TcpListener::close(state_ptr);
+        unsafe { state_ptr.drop_in_place(); }
+    })
+}
+
 impl Drop for TcpListener {
     fn drop(&mut self) {
         let state_ptr = self.state_ptr;
         if self.is_registered {
-            spawn_local!({
-                yield TcpListener::close(state_ptr);
-                unsafe { state_ptr.drop_in_place(); }
-            });
+            local_scheduler().sched(close_listener(state_ptr));
         } else {
             unsafe { state_ptr.drop_in_place(); }
         }

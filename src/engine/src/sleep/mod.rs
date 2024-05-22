@@ -16,7 +16,7 @@ impl SleepingCoroutine {
     }
 }
 
-pub fn sleep(dur: Duration) -> YieldStatus {
+pub fn sleep(dur: Duration, _res: *mut ()) -> YieldStatus {
     YieldStatus::sleep(dur)
 }
 

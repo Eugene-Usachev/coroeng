@@ -94,7 +94,7 @@ pub fn run_on_core(coroutine: CoroutineImpl, core: core::CoreId) {
 ///     run_on_all_cores(greetings_from_different_cores);
 /// }
 /// ```
-pub fn run_on_all_cores<C: 'static + Send + Clone + Fn() -> CoroutineImpl>(creator: C) {
+pub fn run_on_all_cores<T, C: 'static + Send + Clone + Fn(*mut T) -> CoroutineImpl>(creator: C) {
     let cores = core::get_core_ids().unwrap();
     for i in 1..cores.len() {
         let core = cores[i];
@@ -102,9 +102,9 @@ pub fn run_on_all_cores<C: 'static + Send + Clone + Fn() -> CoroutineImpl>(creat
         std::thread::Builder::new()
             .name(format!("worker on core: {}", i))
             .spawn(move || {
-                run_on_core(creator(), core);
+                run_on_core(creator(std::ptr::null_mut()), core);
             }).expect("failed to create worker thread");
     }
 
-    run_on_core(creator(), cores[0]);
+    run_on_core(creator(std::ptr::null_mut()), cores[0]);
 }
