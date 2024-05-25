@@ -6,6 +6,7 @@ use std::mem::MaybeUninit;
 
 pub struct Buffer {
     slice: Box<[u8]>,
+    written: usize,
     offset: usize,
     from_pool: bool
 }
@@ -16,6 +17,7 @@ impl Buffer {
         unsafe { v.set_len(size) };
         Buffer {
             slice: v.into_boxed_slice(),
+            written: 0,
             offset: 0,
             from_pool: false
         }
@@ -26,15 +28,28 @@ impl Buffer {
         unsafe { v.set_len(size) };
         Buffer {
             slice: v.into_boxed_slice(),
+            written: 0,
             offset: 0,
             from_pool: true
         }
     }
 
+    #[inline(always)]
     pub fn len(&self) -> usize {
+        self.written
+    }
+
+    #[inline(always)]
+    pub fn offset(&self) -> usize {
         self.offset
     }
 
+    #[inline(always)]
+    pub fn set_offset(&mut self, offset: usize) {
+        self.offset = offset;
+    }
+
+    #[inline(always)]
     pub fn cap(&self) -> usize {
         self.slice.len()
     }
@@ -42,33 +57,34 @@ impl Buffer {
     // TODO: need test
     pub fn append(&mut self, buf: &[u8]) {
         let len = buf.len();
-        if unlikely(len > self.slice.len() - self.offset) {
-            let temp = self.slice[..self.offset].to_vec();
+        if unlikely(len > self.slice.len() - self.written) {
+            let temp = self.slice[..self.written].to_vec();
             let new_len = (temp.len() + len) * 2;
             let mut v = Vec::with_capacity(new_len);
             unsafe { v.set_len(new_len) };
             self.slice = v.into_boxed_slice();
-            self.slice[..self.offset].copy_from_slice(&temp);
+            self.slice[..self.written].copy_from_slice(&temp);
             self.from_pool = false;
         }
 
-        self.slice[self.offset..self.offset + len].copy_from_slice(buf);
-        self.offset += len;
+        self.slice[self.written..self.written + len].copy_from_slice(buf);
+        self.written += len;
     }
 
     pub fn as_slice(&self) -> &[u8] {
-        &self.slice[..self.offset]
+        &self.slice[self.offset..self.written]
     }
 
     pub fn as_ptr(&self) -> *const u8 {
-        self.slice.as_ptr()
+        unsafe { self.slice.as_ptr().offset(self.offset as isize) }
     }
 
     pub fn as_mut_ptr(&mut self) -> *mut u8 {
-        self.slice.as_mut_ptr()
+        unsafe { self.slice.as_mut_ptr().offset(self.offset as isize) }
     }
 
     pub fn clear(&mut self) {
+        self.written = 0;
         self.offset = 0;
     }
 

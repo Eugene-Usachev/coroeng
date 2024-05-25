@@ -6,9 +6,15 @@ use crate::coroutine::YieldStatus;
 /// # Example
 ///
 /// ```rust
-/// // work here
-/// yield $crate::coroutine::yield_now(); // let the scheduler wake other coroutines up.
-/// // work here after some time
+/// use engine::coroutine::yield_now;
+/// use proc::coro;
+///
+/// #[coro]
+/// fn func_with_yield() {
+///     // work here
+///     yield yield_now(); // let the scheduler wake other coroutines up.
+///     // work here after some time
+/// }
 /// ```
 pub fn yield_now() -> YieldStatus {
     YieldStatus::yield_now()

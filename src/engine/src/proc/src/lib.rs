@@ -394,6 +394,7 @@ pub fn coro(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let fn_return_type = &input.sig.output;
     let fn_where_clause = &input.sig.generics.where_clause;
     let mut fn_block = &mut input.block;
+    let attr = &input.attrs;
 
     transform_function_yield(&mut fn_block);
 
@@ -423,12 +424,22 @@ pub fn coro(_attr: TokenStream, item: TokenStream) -> TokenStream {
         },
     };
 
-    let expanded;
+    let mut expanded;
     expanded = quote! {
         #[inline(always)]
+    };
+    for attr in attr {
+        expanded = quote! {
+            #expanded
+            #attr
+        };
+    }
+
+    expanded = quote! {
+        #expanded
         #fn_vis fn #fn_name #fn_generics (#fn_args) #fn_where_clause -> engine::coroutine::CoroutineImpl {
             std::boxed::Box::pin(#[coroutine] static move || {
-                #fn_block
+            #fn_block
             })
         }
     };

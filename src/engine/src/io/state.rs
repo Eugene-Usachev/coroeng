@@ -32,14 +32,13 @@ pub struct WriteTcpState {
     pub(crate) fd: RawFd,
     pub(crate) buffer: Buffer,
     pub(crate) coroutine: CoroutineImpl,
-    pub(crate) result: *mut Result<usize, Error>
+    pub(crate) result: *mut Result<Option<Buffer>, Error>
 }
 
 pub struct WriteAllTcpState {
     pub(crate) fd: RawFd,
     pub(crate) buffer: Buffer,
     pub(crate) coroutine: CoroutineImpl,
-    pub(crate) bytes_written: usize,
     pub(crate) result: *mut Result<(), Error>
 }
 
@@ -102,13 +101,13 @@ impl State {
     }
 
     #[inline(always)]
-    pub(crate) fn new_write_tcp(stream: RawFd, buf: Buffer, coroutine: CoroutineImpl, result: *mut Result<usize, Error>) -> Self {
+    pub(crate) fn new_write_tcp(stream: RawFd, buf: Buffer, coroutine: CoroutineImpl, result: *mut Result<Option<Buffer>, Error>) -> Self {
         State::WriteTcp(Box::new(WriteTcpState { fd: stream, buffer: buf, coroutine, result }))
     }
 
     #[inline(always)]
     pub(crate) fn new_write_all_tcp(stream: RawFd, buf: Buffer, coroutine: CoroutineImpl, result: *mut Result<(), Error>) -> Self {
-        State::WriteAllTcp(Box::new(WriteAllTcpState { fd: stream, buffer: buf, coroutine, bytes_written: 0, result }))
+        State::WriteAllTcp(Box::new(WriteAllTcpState { fd: stream, buffer: buf, coroutine, result }))
     }
 
     #[inline(always)]

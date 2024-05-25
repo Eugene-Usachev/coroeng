@@ -176,10 +176,15 @@ impl Selector for IoUringSelector {
                     scheduler.handle_coroutine_state(self, state.coroutine);
                 }
 
-                State::WriteTcp(state) => {
+                State::WriteTcp(mut state) => {
                     handle_ret!(ret, state.result);
 
-                    write_ok!(state.result, ret as usize);
+                    if ret == (state.buffer.len() - state.buffer.offset()) as i32 {
+                        write_ok!(state.result, None);
+                    } else {
+                        state.buffer.set_offset(state.buffer.offset() + ret as usize);
+                        write_ok!(state.result, Some(state.buffer));
+                    }
 
                     scheduler.handle_coroutine_state(self, state.coroutine)
                 }
@@ -188,12 +193,12 @@ impl Selector for IoUringSelector {
                     handle_ret!(ret, state.result);
                     println!("write all ret: {}", ret);
                     let was_written = ret as usize;
-                    if state.bytes_written + was_written < state.buffer.len() {
-                        state.bytes_written += was_written;
+                    if state.buffer.offset() + was_written < state.buffer.len() {
+                        state.buffer.set_offset(state.buffer.offset() + was_written);
                         let sqe = opcode::Write::new(
                             types::Fd(state.fd),
-                            unsafe { state.buffer.as_ptr().add(state.bytes_written) },
-                            (state.buffer.len() - state.bytes_written) as u32
+                            state.buffer.as_ptr(),
+                            (state.buffer.len() - state.buffer.offset()) as u32
                         ).build().user_data(state_ptr.as_u64());
                         unsafe { state_ptr.write(State::WriteAllTcp(state)) };
                         self.push_sqe(sqe);

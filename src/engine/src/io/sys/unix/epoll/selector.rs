@@ -84,12 +84,18 @@ impl EpolledSelector {
                 panic!("[BUG] Epolled Selector handled State::ReadTcp. Please report this issue.");
             }
 
-            State::WriteTcp(state) => {
+            State::WriteTcp(mut state) => {
                 let fd = state.fd;
                 let res = unsafe { write(BorrowedFd::borrow_raw(fd), state.buffer.as_slice()) };
 
                 if res.is_ok() {
-                    write_ok!(state.result, res.unwrap_unchecked());
+                    let written = unsafe { res.unwrap_unchecked() };
+                    if written == state.buffer.len() - state.buffer.offset() {
+                        write_ok!(state.result, None);
+                    } else {
+                        state.buffer.set_offset(state.buffer.offset() + written);
+                        write_ok!(state.result, Some(state.buffer));
+                    }
                 } else {
                     write_err!(state.result, Error::from(res.unwrap_err_unchecked()));
                 }
@@ -97,21 +103,20 @@ impl EpolledSelector {
                 scheduler.handle_coroutine_state(self, state.coroutine);
             }
 
-            State::WriteAllTcp(state) => {
+            State::WriteAllTcp(mut state) => {
                 let fd = state.fd;
-                let slice = state.buffer.as_slice();
-                let mut wrote = 0;
                 let mut res;
+                let len = state.buffer.len();
                 loop {
-                    res = unsafe { write(BorrowedFd::borrow_raw(fd), &slice[wrote..]) };
+                    res = unsafe { write(BorrowedFd::borrow_raw(fd), state.buffer.as_slice()) };
                     if unlikely(res.is_err()) {
                         write_err!(state.result, Error::from(res.unwrap_err_unchecked()));
                         scheduler.handle_coroutine_state(self, state.coroutine);
                         return;
                     }
 
-                    wrote += unsafe { res.unwrap_unchecked() };
-                    if wrote == slice.len() {
+                    state.buffer.set_offset(state.buffer.offset() + unsafe { res.unwrap_unchecked() });
+                    if state.buffer.offset() == len {
                         break;
                     }
                 }

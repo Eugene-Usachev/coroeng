@@ -1,12 +1,12 @@
+//! This module contains [`TcpListener`].
 use std::io::Error;
 use std::net::{SocketAddr};
 use std::os::fd::{IntoRawFd, RawFd};
-use proc::coro;
 use crate::coroutine::{CoroutineImpl, YieldStatus};
 use crate::io::sys::unix::epoll::net::get_tcp_listener_fd;
 use crate::net::tcp::TcpStream;
 use crate::io::State;
-use crate::{local_scheduler, spawn_local};
+use crate::{local_scheduler};
 use crate::utils::Ptr;
 
 /// A TCP socket server, listening for connections.
@@ -17,32 +17,47 @@ use crate::utils::Ptr;
 ///
 /// # Examples
 ///
-/// ```
-/// use std::net::SocketAddr;
+/// ```rust
+/// use std::io::Error;
+/// use std::net::{SocketAddr, ToSocketAddrs};
 /// use engine::net::tcp::TcpListener;
-/// use engine::io::io_yield;
-/// use engine::{ret_yield, spawn_local};
+/// use engine::{coro, spawn_local};
 /// use engine::net::TcpStream;
 ///
-/// let mut listener = ret_yield!(TcpListener::new, "localhost:8081".to_socket_addrs().unwrap().next().unwrap());
-/// loop {
-///     let stream_ = ret_yield!(TcpListener::accept, &mut listener);
-///     if stream_.is_err() {
-///         println!("accept failed, reason: {}", stream_.err().unwrap());
-///         continue;
-///     }
-///
-///     let mut stream: TcpStream = stream_.unwrap();
-///     spawn_local!({
+/// #[coro]
+/// fn start_server() {
+///     #[coro]
+///     fn handle_tcp_client(mut stream: TcpStream) {
 ///         loop {
-///             let mut slice = ret_yield!(TcpStream::read, &mut stream).expect("read failed");
+///             let slice: &[u8] = (yield stream.read()).unwrap();
+///
 ///             if slice.is_empty() {
 ///                 break;
 ///             }
 ///
-///             ret_yield!(TcpStream::write_all, &mut stream, slice.to_vec()).expect("write failed");
+///             let mut buf = engine::utils::buffer();
+///             buf.append(slice);
+///
+///             let res: Result<(), Error> = yield TcpStream::write_all(&mut stream, buf);
+///
+///             if res.is_err() {
+///                 println!("write failed, reason: {}", res.err().unwrap());
+///                 break;
+///             }
 ///         }
-///     });
+///     }
+///
+///     let mut listener: TcpListener = yield TcpListener::new("localhost:8081".to_socket_addrs().unwrap().next().unwrap());
+///     loop {
+///         let stream_: Result<TcpStream, Error> = yield listener.accept();
+///         if stream_.is_err() {
+///             println!("accept failed, reason: {}", stream_.err().unwrap());
+///             continue;
+///         }
+///
+///         let stream = stream_.unwrap();
+///         spawn_local!(handle_tcp_client(stream));
+///     }
 /// }
 /// ```
 pub struct TcpListener {
@@ -52,6 +67,7 @@ pub struct TcpListener {
 }
 
 impl TcpListener {
+    /// Creates a new TcpListener from an existing fd.
     pub fn from_fd(fd: RawFd) -> Self {
         Self {
             state_ptr: Ptr::new(State::new_empty(fd)),
@@ -59,7 +75,7 @@ impl TcpListener {
         }
     }
 
-    /// Returns the state_id of the [`TcpListener`].
+    /// Returns the state_ptr of the [`TcpListener`].
     ///
     /// Uses for low-level work with the scheduler. If you don't know what it is, don't use it.
     pub fn state_ptr(&mut self) -> Ptr<State> {
@@ -73,19 +89,18 @@ impl TcpListener {
 
     /// Creates a new TcpListener.
     ///
-    /// # Arguments
-    ///
-    /// * `addr` - The SocketAddr to bind the TcpListener to.
-    ///
     /// # Examples
     ///
-    /// ```
-    /// use std::net::SocketAddr;
-    /// use engine::ret_yield;
-    /// use engine::net::tcp::Listener;
-    /// use engine::io::io_yield;
+    /// ```rust
+    /// use engine::coro;
+    /// use std::net::{SocketAddr, ToSocketAddrs};
+    /// use engine::net::tcp::TcpListener;
     ///
-    /// let mut listener = ret_yield!(TcpListener::new, "localhost:8081".to_socket_addrs().unwrap().next().unwrap());
+    /// #[coro]
+    /// fn new_listener() {
+    ///     let mut listener: TcpListener = yield TcpListener::new("localhost:8081".to_socket_addrs().unwrap().next().unwrap());
+    ///     yield listener.accept();
+    /// }
     /// ```
     pub fn new(addr: SocketAddr, res: *mut TcpListener) -> YieldStatus {
         YieldStatus::new_tcp_listener(addr, res)
@@ -93,37 +108,25 @@ impl TcpListener {
 
     /// Accepts a new TcpStream.
     ///
-    /// # Arguments
-    ///
-    /// * `TcpListener` - The [`TcpListener`] to accept connections from.
-    ///
     /// # Examples
     ///
-    /// ```
-    /// use std::net::SocketAddr;
-    /// use engine::net::{TcpListener, TcpStream};
-    /// use engine::io::io_yield;
-    /// use engine::{ret_yield, spawn_local};
+    /// ```rust
+    /// use std::io::Error;
+    /// use std::net::{SocketAddr, ToSocketAddrs};
+    /// use engine::coro;
+    /// use engine::net::tcp::TcpListener;
+    /// use engine::net::TcpStream;
     ///
-    /// let mut listener = ret_yield!(TcpListener::new, "localhost:8081".to_socket_addrs().unwrap().next().unwrap());
-    /// loop {
-    ///     let stream_ = ret_yield!(TcpListener::accept, &mut listener);
+    /// #[coro]
+    /// fn accept() {
+    ///     let mut listener: TcpListener = yield TcpListener::new("localhost:8081".to_socket_addrs().unwrap().next().unwrap());
+    ///     let stream_: Result<TcpStream, Error> = yield listener.accept();
     ///     if stream_.is_err() {
     ///         println!("accept failed, reason: {}", stream_.err().unwrap());
-    ///         continue;
+    ///         return;
     ///     }
-    ///
-    ///     let mut stream: TcpStream = stream_.unwrap();
-    ///     spawn_local!({
-    ///         loop {
-    ///             let mut slice = ret_yield!(TcpStream::read, &mut stream).expect("read failed");
-    ///             if slice.is_empty() {
-    ///                 break;
-    ///             }
-    ///
-    ///             ret_yield!(TcpStream::write_all, &mut stream, slice.to_vec()).expect("write failed");
-    ///         }
-    ///     });
+    ///     let mut stream = stream_.unwrap();
+    ///     yield stream.read();
     /// }
     /// ```
     pub fn accept(&mut self, res: *mut Result<TcpStream, Error>) -> YieldStatus {

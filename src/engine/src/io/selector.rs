@@ -45,6 +45,7 @@ pub trait Selector {
     /// After deregistering, the [`State`] will be ignored in [`Selector::poll`].
     fn deregister(&mut self, fd: RawFd);
 
+    // TODO need test, because I change was_written to Buffer::offset()
     /// Tells the selector that [`WriteTcpState`](crate::io::WriteTcpState) or another writable [`State`] is ready.
     /// So, this method returns before the write syscall is done. The writing will be done in [`Selector::poll`].
     ///

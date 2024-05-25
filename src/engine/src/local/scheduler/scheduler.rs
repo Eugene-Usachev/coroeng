@@ -19,6 +19,7 @@ thread_local! {
     pub static LOCAL_SCHEDULER: UnsafeCell<MaybeUninit<Scheduler>> = UnsafeCell::new(MaybeUninit::zeroed());
 }
 
+// TODO docs
 pub struct Scheduler {
     task_queue: VecDeque<CoroutineImpl>,
     sleeping: Vec<SleepingCoroutine>

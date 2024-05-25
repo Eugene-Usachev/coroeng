@@ -49,7 +49,7 @@ pub struct TcpWrite {
     pub(crate) buffer: Buffer,
     /// Pointer to store the result of the TCP write operation.
     /// If success, the result will contain the number of bytes written.
-    pub(crate) result_ptr: *mut Result<usize, std::io::Error>,
+    pub(crate) result_ptr: *mut Result<Option<Buffer>, std::io::Error>,
 }
 
 /// Represents a TCP write all operation.
@@ -158,7 +158,7 @@ impl YieldStatus {
     }
 
     /// Create a YieldStatus variant [`TcpWrite`].
-    pub fn tcp_write(state_ref: Ptr<State>, buffer: Buffer, result_ptr: *mut Result<usize, std::io::Error>) -> Self {
+    pub fn tcp_write(state_ref: Ptr<State>, buffer: Buffer, result_ptr: *mut Result<Option<Buffer>, std::io::Error>) -> Self {
         YieldStatus::TcpWrite(TcpWrite { state_ref, buffer, result_ptr })
     }
 
