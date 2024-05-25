@@ -29,8 +29,12 @@
 
 use std::io::Error;
 use std::net::ToSocketAddrs;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering::SeqCst;
+use std::time::Duration;
 use engine::{coro, run_on_all_cores, spawn_local};
 use engine::net::{TcpListener, TcpStream};
+use engine::sleep::sleep;
 
 fn tcp_benchmark() {
     #[coro]
@@ -73,7 +77,29 @@ fn tcp_benchmark() {
     run_on_all_cores(start_server);
 }
 
+fn benchmark_sleep() {
+    #[coro]
+    fn spawn_sleep() {
+        println!("spawned {}", SPAWNED.fetch_add(1, SeqCst) + 1);
+        yield sleep(Duration::from_secs(1000000));
+    }
+
+    const N: usize = 10_000_000;
+    const PAR: usize = 6;
+
+    static SPAWNED: AtomicUsize = AtomicUsize::new(0);
+
+    #[coro]
+    fn benchmark() {
+        for _ in 0..N / PAR {
+            spawn_local!(spawn_sleep());
+        }
+    }
+
+    run_on_all_cores(benchmark);
+}
+
 fn main() {
-    tcp_benchmark();
+    benchmark_sleep();
 }
 

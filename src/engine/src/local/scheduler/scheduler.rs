@@ -1,6 +1,6 @@
 use std::cell::{UnsafeCell};
-use std::collections::VecDeque;
-use std::intrinsics::{unlikely};
+use std::collections::{BTreeSet, VecDeque};
+use std::intrinsics::{likely, unlikely};
 use std::mem;
 use std::mem::{MaybeUninit, transmute};
 #[allow(unused_imports)] // compiler will complain if it's not used, but we need it for resume()
@@ -22,14 +22,18 @@ thread_local! {
 // TODO docs
 pub struct Scheduler {
     task_queue: VecDeque<CoroutineImpl>,
-    sleeping: Vec<SleepingCoroutine>
+
+    sleeping: BTreeSet<SleepingCoroutine>,
+    need_to_wake: Vec<Instant>
 }
 
 impl Scheduler {
     pub fn init() {
         let scheduler = Self {
             task_queue: VecDeque::with_capacity(8),
-            sleeping: Vec::with_capacity(8),
+
+            sleeping: BTreeSet::new(),
+            need_to_wake: Vec::with_capacity(8)
         };
 
         LOCAL_SCHEDULER.with(|local| {
@@ -42,15 +46,18 @@ impl Scheduler {
     }
 
     pub fn awake_coroutines(&mut self) {
-        let mut new_list = Vec::with_capacity(self.sleeping.len());
-        mem::swap(&mut new_list, &mut self.sleeping);
         let now = Instant::now();
-        for sleeping_coroutine in new_list.into_iter() {
-            if unlikely(now >= sleeping_coroutine.execution_time) {
-                self.sched(sleeping_coroutine.co);
-                continue;
+        loop {
+            if let Some(sleeping_coroutine) = self.sleeping.pop_first() {
+                if now >= sleeping_coroutine.execution_time {
+                    self.sched(sleeping_coroutine.co);
+                } else {
+                    self.sleeping.insert(sleeping_coroutine);
+                    break;
+                }
+            } else {
+                break;
             }
-            self.sleeping.push(sleeping_coroutine)
         }
     }
 
@@ -62,7 +69,8 @@ impl Scheduler {
                 match status {
                     YieldStatus::Sleep(dur) => {
                         let sleep = SleepingCoroutine::new(dur, task);
-                        self.sleeping.push(sleep);
+                        self.sleeping.insert(sleep);
+                        println!("sleeping: {}", self.sleeping.len());
                     }
 
                     YieldStatus::Yield => {
