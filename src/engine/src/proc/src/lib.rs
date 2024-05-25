@@ -8,6 +8,14 @@ use quote::{quote};
 use syn::{parse_macro_input, ItemFn, ReturnType, Expr, Stmt, Block};
 use syn::token::Semi;
 
+/// Transforms function body. Replaces all `yield` expressions to
+/// ```ignore
+/// unsafe {
+///     let mut coroutine_result_DONT_NAME_YOUR_VARIABLE_AS_IT = std::mem::MaybeUninit::uninit();
+///     #yield_ex;
+///     coroutine_result_DONT_NAME_YOUR_VARIABLE_AS_IT.assume_init()#semi
+/// }
+/// ```
 fn transform_function_yield(block: &mut Block) {
     /// Here we get expr like `yield stream.read()`
     /// and transform it to
@@ -188,6 +196,13 @@ fn transform_function_yield(block: &mut Block) {
     }
 }
 
+/// Transforms function body. Replaces all `return` expressions and the implicit return to
+/// ```ignore
+/// {
+///     unsafe { *coroutine_argument_DONT_NAME_YOUR_VARIABLE_AS_IT = #ret_expr; }
+///     return;
+/// }
+/// ```
 fn transform_function_return(block: &mut Block, level: usize) {
     fn transform_expr(expr: &mut Expr, semi: Option<Semi>, level: usize) {
         match expr {
@@ -447,6 +462,39 @@ pub fn coro(_attr: TokenStream, item: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
+/// Wait for the coroutine to finish. It will return the result of the coroutine.
+///
+/// # Example
+///
+/// ```ignore
+/// use engine::{coro, wait};
+/// use engine::net::TcpStream;
+/// use engine::utils::Buffer;
+/// use std::io::Error;
+///
+/// #[coro]
+/// fn difficult_write(mut stream: TcpStream, mut buf: Buffer) -> usize {
+///     loop {
+///         let res: Result<Option<Buffer>, Error> = yield stream.write(buf);
+///         if res.is_err() {
+///             println!("write failed, reason: {}", res.err().unwrap());
+///             break;
+///         }
+///         if let Some(new_buf) = res.unwrap() {
+///             buf = new_buf;
+///         } else {
+///             break;
+///         }
+///     }
+///     42
+/// }
+///
+/// #[coro]
+/// fn handle_tcp_stream(mut stream: TcpStream) {
+///     let res = wait!(difficult_write(stream, engine::utils::buffer()));
+///     println!("{}", res); // 42
+/// }
+/// ```
 #[proc_macro]
 pub fn wait(input: TokenStream) -> TokenStream {
     let input_expr = parse_macro_input!(input as Expr);
@@ -482,6 +530,30 @@ pub fn wait(input: TokenStream) -> TokenStream {
     TokenStream::from(block)
 }
 
+/// Spawn a new coroutine in the local scheduler.
+///
+/// # Example
+///
+/// ```ignore
+/// use engine::{coro, spawn_local};
+/// use engine::net::{TcpListener, TcpStream};
+/// use std::net::ToSocketAddrs;
+///
+/// #[coro]
+/// fn run_server() {
+///     let mut listener = yield TcpListener::new("engine:8081".to_socket_addrs().unwrap().next().unwrap());
+///     loop {
+///         let stream = (yield listener.accept()).expect("accept failed");
+///         spawn_local!(handle_tcp_stream(stream)); // spawn a new coroutine.
+///         // So it will be executed in the local scheduler independently from this coroutine.
+///     }
+/// }
+///
+/// #[coro]
+/// fn handle_tcp_stream(mut stream: TcpStream) {
+///     // process stream
+/// }
+/// ```
 #[proc_macro]
 pub fn spawn_local(input: TokenStream) -> TokenStream {
     let input_expr = parse_macro_input!(input as Expr);

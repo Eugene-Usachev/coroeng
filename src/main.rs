@@ -32,9 +32,52 @@ use std::net::ToSocketAddrs;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::SeqCst;
 use std::time::Duration;
-use engine::{coro, run_on_all_cores, spawn_local};
+use engine::{coro, run_on_all_cores, spawn_local, wait};
 use engine::net::{TcpListener, TcpStream};
 use engine::sleep::sleep;
+use engine::utils::Buffer;
+
+fn docs() {
+    #[coro]
+    fn difficult_write(mut stream: TcpStream, mut buf: Buffer) -> usize {
+        loop {
+            let res: Result<Option<Buffer>, Error> = yield stream.write(buf);
+            if res.is_err() {
+                println!("write failed, reason: {}", res.err().unwrap());
+                break;
+            }
+            if let Some(new_buf) = res.unwrap() {
+                buf = new_buf;
+            } else {
+                break;
+            }
+        }
+        42
+    }
+    #[coro]
+    fn handle_tcp_stream(mut stream: TcpStream) {
+        let res = wait!(difficult_write(stream, engine::utils::buffer()));
+        println!("{}", res);
+    }
+
+    #[coro]
+    fn start_server() {
+        let mut listener = yield TcpListener::new("engine:8081".to_socket_addrs().unwrap().next().unwrap());
+        loop {
+            let stream_ = yield listener.accept();
+
+            if stream_.is_err() {
+                println!("accept failed, reason: {}", stream_.err().unwrap());
+                continue;
+            }
+
+            let stream: TcpStream = stream_.unwrap();
+            spawn_local!(handle_tcp_stream(stream));
+        }
+    }
+
+    run_on_all_cores(start_server);
+}
 
 fn tcp_benchmark() {
     #[coro]
@@ -100,6 +143,6 @@ fn benchmark_sleep() {
 }
 
 fn main() {
-    benchmark_sleep();
+    docs();
 }
 

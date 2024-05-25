@@ -70,7 +70,6 @@ impl Scheduler {
                     YieldStatus::Sleep(dur) => {
                         let sleep = SleepingCoroutine::new(dur, task);
                         self.sleeping.insert(sleep);
-                        println!("sleeping: {}", self.sleeping.len());
                     }
 
                     YieldStatus::Yield => {

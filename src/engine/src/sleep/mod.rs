@@ -1,10 +1,9 @@
-mod controller;
-
 use std::cmp::Ordering;
 use std::time::{Duration, Instant};
 use crate::coroutine::coroutine::{CoroutineImpl};
 use crate::coroutine::YieldStatus;
 
+/// A coroutine that will be executed after a certain amount of time.
 pub(crate) struct SleepingCoroutine {
     pub(crate) execution_time: Instant,
     pub(crate) co: CoroutineImpl,
@@ -19,6 +18,28 @@ impl SleepingCoroutine {
     }
 }
 
+/// Tell the scheduler to wake the coroutine up after a certain amount of time.
+///
+/// # Note
+///
+/// It can be woken up later, than it was indicated, but never earlier.
+///
+/// # Example
+///
+/// ```rust
+/// use engine::coro;
+/// use engine::sleep;
+/// use std::time::Duration;
+/// use engine::sleep::sleep;
+///
+/// #[coro]
+/// fn with_sleep() {
+///     // some work here
+///     yield sleep(Duration::from_millis(100));
+///     // some work after 100ms
+/// }
+/// ```
+///
 pub fn sleep(dur: Duration, _res: *mut ()) -> YieldStatus {
     YieldStatus::sleep(dur)
 }
