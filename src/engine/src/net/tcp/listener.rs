@@ -35,7 +35,7 @@ use crate::utils::Ptr;
 ///                 break;
 ///             }
 ///
-///             let mut buf = engine::utils::buffer();
+///             let mut buf = engine::buf::buffer();
 ///             buf.append(slice);
 ///
 ///             let res: Result<(), Error> = yield TcpStream::write_all(&mut stream, buf);

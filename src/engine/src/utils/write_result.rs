@@ -1,3 +1,4 @@
+/// shortcut for `unsafe { $ptr.write(Ok($res)) }`
 #[macro_export]
 macro_rules! write_ok {
     ($ptr:expr, $res:expr) => {
@@ -5,6 +6,7 @@ macro_rules! write_ok {
     }
 }
 
+/// shortcut for `unsafe { $ptr.write(Err($err)) }`
 #[macro_export]
 macro_rules! write_err {
     ($ptr:expr, $err:expr) => {

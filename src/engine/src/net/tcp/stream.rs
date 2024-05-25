@@ -29,7 +29,7 @@ use crate::utils::{Buffer, Ptr};
 ///             break;
 ///         }
 ///
-///         let mut buf = engine::utils::buffer();
+///         let mut buf = engine::buf::buffer();
 ///         buf.append(slice);
 ///
 ///         let res: Result<(), Error> = yield TcpStream::write_all(&mut stream, buf);
@@ -170,15 +170,15 @@ impl TcpStream {
     ///
     /// # Note
     ///
-    /// Don't worry about moving [`Buffer`]. In most cases buffer will be moved in [`BufPool`](crate::utils::BufPool).
-    /// So using [`buffer`](crate::utils::buffer) and moving the buffer is lead to reusing memory and avoiding allocations.
+    /// Don't worry about moving [`Buffer`]. In most cases buffer will be moved in [`BufPool`](crate::buf::BufPool).
+    /// So using [`buffer`](crate::buf::buffer) and moving the buffer is lead to reusing memory and avoiding allocations.
     ///
     /// # Example
     ///
     /// ```rust
     /// use engine::coro;
     /// use engine::net::TcpStream;
-    /// use engine::utils::Buffer;
+    /// use engine::buf::Buffer;
     /// use std::io::Error;
     ///
     /// #[coro]
@@ -209,7 +209,7 @@ impl TcpStream {
     /// ```rust
     /// use engine::coro;
     /// use engine::net::TcpStream;
-    /// use engine::utils::Buffer;
+    /// use engine::buf::Buffer;
     /// use std::io::Error;
     ///
     /// #[coro]

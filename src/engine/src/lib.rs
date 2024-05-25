@@ -16,6 +16,7 @@ pub mod sync;
 pub mod utils;
 pub mod cfg;
 pub mod run;
+pub mod buf;
 //pub mod work_stealing;
 
 pub use local::local_scheduler;

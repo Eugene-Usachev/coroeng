@@ -35,7 +35,7 @@ use std::time::Duration;
 use engine::{coro, run_on_all_cores, spawn_local, wait};
 use engine::net::{TcpListener, TcpStream};
 use engine::sleep::sleep;
-use engine::utils::Buffer;
+use engine::buf::Buffer;
 
 fn docs() {
     #[coro]
@@ -56,7 +56,7 @@ fn docs() {
     }
     #[coro]
     fn handle_tcp_stream(mut stream: TcpStream) {
-        let res = wait!(difficult_write(stream, engine::utils::buffer()));
+        let res = wait!(difficult_write(stream, engine::buf::buffer()));
         println!("{}", res);
     }
 
@@ -89,7 +89,7 @@ fn tcp_benchmark() {
                 break;
             }
 
-            let mut buf = engine::utils::buffer();
+            let mut buf = engine::buf::buffer();
             buf.append(slice);
 
             let res: Result<(), Error> = yield TcpStream::write_all(&mut stream, buf);

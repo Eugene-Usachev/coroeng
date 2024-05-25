@@ -469,7 +469,7 @@ pub fn coro(_attr: TokenStream, item: TokenStream) -> TokenStream {
 /// ```ignore
 /// use engine::{coro, wait};
 /// use engine::net::TcpStream;
-/// use engine::utils::Buffer;
+/// use engine::buf::Buffer;
 /// use std::io::Error;
 ///
 /// #[coro]
@@ -491,7 +491,7 @@ pub fn coro(_attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// #[coro]
 /// fn handle_tcp_stream(mut stream: TcpStream) {
-///     let res = wait!(difficult_write(stream, engine::utils::buffer()));
+///     let res = wait!(difficult_write(stream, engine::buf::buffer()));
 ///     println!("{}", res); // 42
 /// }
 /// ```

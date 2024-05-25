@@ -161,7 +161,7 @@ impl Selector for IoUringSelector {
 
                     println!("poll ret: {}", ret);
 
-                    let buffer = utils::buffer();
+                    let buffer = buf::buffer();
                     unsafe { state_ptr.write(State::new_read_tcp(state.fd, buffer, state.coroutine, state.result)) };
                     self.register(state_ptr);
                 }
