@@ -17,9 +17,10 @@ pub mod utils;
 pub mod cfg;
 pub mod run;
 pub mod buf;
+pub mod scheduler;
 //pub mod work_stealing;
 
-pub use local::local_scheduler;
+pub use scheduler::local_scheduler;
 #[allow(unused_imports)]
 pub use macros::*;
 pub use run::*;

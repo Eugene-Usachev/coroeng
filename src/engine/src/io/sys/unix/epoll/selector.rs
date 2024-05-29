@@ -11,8 +11,8 @@ use crate::io::selector::Selector;
 use crate::io::sys::unix::epoll::net::setup_connection;
 use crate::io::sys::unix::check_error::check_error;
 use crate::io::sys::unix::net;
-use crate::io::State;
-use crate::local::Scheduler;
+use crate::io::PollState;
+use crate::scheduler::Scheduler;
 use crate::net::TcpStream;
 use crate::{write_err, write_ok};
 use crate::utils::Ptr;
@@ -23,7 +23,7 @@ pub(crate) const MAX_EPOLL_EVENTS_RETURNED: usize = 256;
 // We need to keep the size of the struct as small as possible to cache it.
 pub(crate) struct EpolledSelector {
     epoll: Epoll,
-    unhandled_states: Vec<Ptr<State>>,
+    unhandled_states: Vec<Ptr<PollState>>,
     events: [EpollEvent; MAX_EPOLL_EVENTS_RETURNED],
     req_buf: [u8; REQ_BUF_LEN]
 }
@@ -42,12 +42,12 @@ impl EpolledSelector {
     }
 
     #[inline(always)]
-    fn handle_state(&mut self, state_ptr: Ptr<State>, scheduler: &mut Scheduler) {
+    fn handle_state(&mut self, state_ptr: Ptr<PollState>, scheduler: &mut Scheduler) {
         let state = unsafe { state_ptr.read() };
         match state {
-            State::Empty(_) => {}
+            PollState::Empty(_) => {}
 
-            State::AcceptTcp(state) => {
+            PollState::AcceptTcp(state) => {
                 let res = accept4(state.fd, SockFlag::SOCK_CLOEXEC);
                 if res.is_err() {
                     let err = res.unwrap_err();
@@ -66,7 +66,7 @@ impl EpolledSelector {
                 scheduler.handle_coroutine_state(self, state.coroutine);
             }
 
-            State::PollTcp(state) => {
+            PollState::PollTcp(state) => {
                 let res = recvfrom::<()>(state.fd, &mut self.req_buf);
                 if res.is_err() {
                     write_err!(state.result, Error::from(res.unwrap_err_unchecked()));
@@ -80,11 +80,11 @@ impl EpolledSelector {
                 scheduler.handle_coroutine_state(self, state.coroutine);
             }
 
-            State::ReadTcp(_) => {
+            PollState::ReadTcp(_) => {
                 panic!("[BUG] Epolled Selector handled State::ReadTcp. Please report this issue.");
             }
 
-            State::WriteTcp(mut state) => {
+            PollState::WriteTcp(mut state) => {
                 let fd = state.fd;
                 let res = unsafe { write(BorrowedFd::borrow_raw(fd), state.buffer.as_slice()) };
 
@@ -103,7 +103,7 @@ impl EpolledSelector {
                 scheduler.handle_coroutine_state(self, state.coroutine);
             }
 
-            State::WriteAllTcp(mut state) => {
+            PollState::WriteAllTcp(mut state) => {
                 let fd = state.fd;
                 let mut res;
                 let len = state.buffer.len();
@@ -125,7 +125,7 @@ impl EpolledSelector {
                 scheduler.handle_coroutine_state(self, state.coroutine)
             }
 
-            State::CloseTcp(state) => {
+            PollState::CloseTcp(state) => {
                 let fd = state.fd;
                 let _ = self.deregister(state.fd);
                 unsafe { net::close_connection(&BorrowedFd::borrow_raw(fd)); }
@@ -163,10 +163,14 @@ impl Selector for EpolledSelector {
     }
 
     #[inline(always)]
-    fn register(&mut self, state_ptr: Ptr<State>) {
+    fn register(&mut self, state_ptr: Ptr<PollState>) {
         let fd = unsafe { state_ptr.as_ref() }.fd();
-        unsafe {
-            self.epoll.add(BorrowedFd::borrow_raw(fd), EpollEvent::new(EpollFlags::EPOLLIN, state_ptr.as_u64())).expect("failed to add fd to epoll");
+        let res = unsafe {
+            self.epoll.add(BorrowedFd::borrow_raw(fd), EpollEvent::new(EpollFlags::EPOLLIN, state_ptr.as_u64()))
+        };
+
+        if res.is_err() {
+            panic!("failed to add fd to epoll: {} for fd: {}", res.unwrap_err(), fd);
         }
     }
 
@@ -177,16 +181,16 @@ impl Selector for EpolledSelector {
         }
     }
 
-    fn write(&mut self, state_ref: Ptr<State>) {
+    fn write(&mut self, state_ref: Ptr<PollState>) {
         self.unhandled_states.push(state_ref);
     }
 
-    fn write_all(&mut self, state_ref: Ptr<State>) {
+    fn write_all(&mut self, state_ref: Ptr<PollState>) {
         self.unhandled_states.push(state_ref);
     }
 
     #[inline(always)]
-    fn close_connection(&mut self, state_ref: Ptr<State>) {
+    fn close_connection(&mut self, state_ref: Ptr<PollState>) {
         self.unhandled_states.push(state_ref);
     }
 }

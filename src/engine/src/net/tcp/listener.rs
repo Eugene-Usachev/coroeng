@@ -5,7 +5,7 @@ use std::os::fd::{IntoRawFd, RawFd};
 use crate::coroutine::{CoroutineImpl, YieldStatus};
 use crate::io::sys::unix::epoll::net::get_tcp_listener_fd;
 use crate::net::tcp::TcpStream;
-use crate::io::State;
+use crate::io::PollState;
 use crate::{local_scheduler};
 use crate::utils::Ptr;
 
@@ -61,7 +61,7 @@ use crate::utils::Ptr;
 /// }
 /// ```
 pub struct TcpListener {
-    pub(crate) state_ptr: Ptr<State>,
+    pub(crate) state_ptr: Ptr<PollState>,
     /// OwnedFd is required for Drop
     pub(crate) is_registered: bool
 }
@@ -70,7 +70,7 @@ impl TcpListener {
     /// Creates a new TcpListener from an existing fd.
     pub fn from_fd(fd: RawFd) -> Self {
         Self {
-            state_ptr: Ptr::new(State::new_empty(fd)),
+            state_ptr: Ptr::new(PollState::new_empty(fd)),
             is_registered: false
         }
     }
@@ -78,7 +78,7 @@ impl TcpListener {
     /// Returns the state_ptr of the [`TcpListener`].
     ///
     /// Uses for low-level work with the scheduler. If you don't know what it is, don't use it.
-    pub fn state_ptr(&mut self) -> Ptr<State> {
+    pub fn state_ptr(&mut self) -> Ptr<PollState> {
         self.state_ptr
     }
 
@@ -138,12 +138,12 @@ impl TcpListener {
     }
 
     /// Closes the [`TcpListener`] by state_id. After closing, the [`TcpListener`] can not be used.
-    fn close(state_ref: Ptr<State>) -> YieldStatus {
+    fn close(state_ref: Ptr<PollState>) -> YieldStatus {
         YieldStatus::tcp_close(state_ref)
     }
 }
 
-fn close_listener(state_ptr: Ptr<State>) -> CoroutineImpl {
+fn close_listener(state_ptr: Ptr<PollState>) -> CoroutineImpl {
     Box::pin(#[coroutine] static move || {
         yield TcpListener::close(state_ptr);
         unsafe { state_ptr.drop_in_place(); }

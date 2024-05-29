@@ -37,11 +37,11 @@ macro_rules! spawn_move {
 }
 
 // TODO r this need only for docs.
-// / These macros spawns provided coroutine in current [`Scheduler`](crate::local::Scheduler).
+// / These macros spawns provided coroutine in current [`Scheduler`](crate::scheduler::Scheduler).
 // ///
 // /// # Panics
 // ///
-// /// panics if [`LOCAL_SCHEDULER`](crate::local::scheduler::scheduler::LOCAL_SCHEDULER) is not initialized.
+// /// panics if [`LOCAL_SCHEDULER`](crate::scheduler::LOCAL_SCHEDULER) is not initialized.
 // /// To initialize it, use [`run_on_all_cores`](crate::run::run_on_all_cores) or [`run_on_core`](crate::run::run_on_core).
 // ///
 // /// # Example

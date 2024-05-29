@@ -5,11 +5,11 @@ use std::cell::UnsafeCell;
 use std::os::fd::RawFd;
 use io_uring::{cqueue, IoUring, opcode, squeue, types};
 use io_uring::types::{SubmitArgs, Timespec};
-use crate::io::{Selector, State};
-use crate::local::Scheduler;
+use crate::io::{Selector, PollState};
+use crate::scheduler::Scheduler;
 use crate::net::TcpStream;
-use crate::{write_ok};
-use crate::utils::{self, hide_mut_unsafe, Ptr};
+use crate::{buf, write_ok};
+use crate::utils::{hide_mut_unsafe, Ptr};
 
 pub(crate) struct IoUringSelector {
     timeout: SubmitArgs<'static, 'static>,
@@ -145,9 +145,9 @@ impl Selector for IoUringSelector {
             println!("Handle state: {:?} with ret: {ret}", unsafe { state_ptr.as_ref() });
 
             match state {
-                State::Empty(_) => {}
+                PollState::Empty(_) => {}
 
-                State::AcceptTcp(state) => {
+                PollState::AcceptTcp(state) => {
                     handle_ret!(ret, state.result);
 
                     let incoming_fd = ret;
@@ -156,17 +156,17 @@ impl Selector for IoUringSelector {
                     scheduler.handle_coroutine_state(self, state.coroutine);
                 }
 
-                State::PollTcp(state) => {
+                PollState::PollTcp(state) => {
                     handle_ret!(ret, state.result);
 
                     println!("poll ret: {}", ret);
 
                     let buffer = buf::buffer();
-                    unsafe { state_ptr.write(State::new_read_tcp(state.fd, buffer, state.coroutine, state.result)) };
+                    unsafe { state_ptr.write(PollState::new_read_tcp(state.fd, buffer, state.coroutine, state.result)) };
                     self.register(state_ptr);
                 }
 
-                State::ReadTcp(state) => {
+                PollState::ReadTcp(state) => {
                     println!("read ret: {}", ret);
 
                     handle_ret!(ret, state.result);
@@ -176,7 +176,7 @@ impl Selector for IoUringSelector {
                     scheduler.handle_coroutine_state(self, state.coroutine);
                 }
 
-                State::WriteTcp(mut state) => {
+                PollState::WriteTcp(mut state) => {
                     handle_ret!(ret, state.result);
 
                     if ret == (state.buffer.len() - state.buffer.offset()) as i32 {
@@ -189,7 +189,7 @@ impl Selector for IoUringSelector {
                     scheduler.handle_coroutine_state(self, state.coroutine)
                 }
 
-                State::WriteAllTcp(mut state) => {
+                PollState::WriteAllTcp(mut state) => {
                     handle_ret!(ret, state.result);
                     println!("write all ret: {}", ret);
                     let was_written = ret as usize;
@@ -200,7 +200,7 @@ impl Selector for IoUringSelector {
                             state.buffer.as_ptr(),
                             (state.buffer.len() - state.buffer.offset()) as u32
                         ).build().user_data(state_ptr.as_u64());
-                        unsafe { state_ptr.write(State::WriteAllTcp(state)) };
+                        unsafe { state_ptr.write(PollState::WriteAllTcp(state)) };
                         self.push_sqe(sqe);
                         continue;
                     }
@@ -210,7 +210,7 @@ impl Selector for IoUringSelector {
                     scheduler.handle_coroutine_state(self, state.coroutine)
                 }
 
-                State::CloseTcp(state) => {
+                PollState::CloseTcp(state) => {
                     scheduler.handle_coroutine_state(self, state.coroutine)
                 }
             }
@@ -219,40 +219,40 @@ impl Selector for IoUringSelector {
         Ok(())
     }
 
-    fn register(&mut self, state_ptr: Ptr<State>) {
+    fn register(&mut self, state_ptr: Ptr<PollState>) {
         let state = unsafe { state_ptr.as_mut() };
         let mut sqe = match state {
-            State::Empty(_) => {
+            PollState::Empty(_) => {
                 return;
             }
 
-            State::AcceptTcp(state) => {
+            PollState::AcceptTcp(state) => {
                 opcode::Accept::new(types::Fd(state.fd), ptr::null_mut(), ptr::null_mut())
                     .build()
             }
 
-            State::PollTcp(state) => {
+            PollState::PollTcp(state) => {
                 opcode::PollAdd::new(types::Fd(state.fd), libc::POLLIN as _)
                     .build()
             }
 
-            State::ReadTcp(state) => {
+            PollState::ReadTcp(state) => {
                 opcode::Recv::new(types::Fd(state.fd), state.buffer.as_mut_ptr(), state.buffer.cap() as u32)
                     .build()
             }
 
-            State::WriteTcp(state) => {
+            PollState::WriteTcp(state) => {
                 opcode::SendZc::new(types::Fd(state.fd), state.buffer.as_ptr(), state.buffer.len() as u32)
                     .build()
             }
 
-            State::WriteAllTcp(state) => {
+            PollState::WriteAllTcp(state) => {
                 // TODO: maybe we need to use state.buffer.as_ptr().add(state.bytes_written) and use register in poll?
                 opcode::SendZc::new(types::Fd(state.fd), state.buffer.as_ptr(), state.buffer.len() as u32)
                     .build()
             }
 
-            State::CloseTcp(state) => {
+            PollState::CloseTcp(state) => {
                 opcode::Close::new(types::Fd(state.fd))
                     .build()
             }
@@ -268,17 +268,17 @@ impl Selector for IoUringSelector {
     fn deregister(&mut self, _fd: RawFd) {}
 
     #[inline(always)]
-    fn write(&mut self, state_ref: Ptr<State>) {
+    fn write(&mut self, state_ref: Ptr<PollState>) {
         self.register(state_ref);
     }
 
     #[inline(always)]
-    fn write_all(&mut self, state_ref: Ptr<State>) {
+    fn write_all(&mut self, state_ref: Ptr<PollState>) {
         self.register(state_ref);
     }
 
     #[inline(always)]
-    fn close_connection(&mut self, state_ref: Ptr<State>) {
+    fn close_connection(&mut self, state_ref: Ptr<PollState>) {
         self.register(state_ref);
     }
 }

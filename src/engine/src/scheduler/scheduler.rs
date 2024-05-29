@@ -1,7 +1,5 @@
 use std::cell::{UnsafeCell};
 use std::collections::{BTreeSet, VecDeque};
-use std::intrinsics::{likely, unlikely};
-use std::mem;
 use std::mem::{MaybeUninit, transmute};
 #[allow(unused_imports)] // compiler will complain if it's not used, but we need it for resume()
 use std::ops::{Coroutine, CoroutineState};
@@ -10,9 +8,10 @@ use crate::cfg::{config_selector, SelectorType};
 use crate::coroutine::coroutine::{CoroutineImpl};
 use crate::coroutine::YieldStatus;
 use crate::io::sys::unix::{EpolledSelector, IoUringSelector};
-use crate::io::{Selector, State};
-use crate::net::TcpListener;
-use crate::new_coroutine;
+use crate::io::{Selector, PollState, BlockingState};
+use crate::net::{TcpListener};
+use crate::{new_coroutine};
+use crate::scheduler::blocking_pool::BlockingPool;
 use crate::sleep::SleepingCoroutine;
 
 thread_local! {
@@ -22,22 +21,27 @@ thread_local! {
 // TODO docs
 pub struct Scheduler {
     task_queue: VecDeque<CoroutineImpl>,
-
     sleeping: BTreeSet<SleepingCoroutine>,
-    need_to_wake: Vec<Instant>
+
+    blocking_pool: BlockingPool,
+    ready_coroutines: Vec<CoroutineImpl>
 }
 
 impl Scheduler {
     pub fn init() {
         let scheduler = Self {
             task_queue: VecDeque::with_capacity(8),
-
             sleeping: BTreeSet::new(),
-            need_to_wake: Vec::with_capacity(8)
+
+            blocking_pool: BlockingPool::new(),
+            ready_coroutines: Vec::with_capacity(8)
         };
 
         LOCAL_SCHEDULER.with(|local| {
-            unsafe { (&mut *local.get()).write(scheduler) };
+            unsafe {
+                (&mut *local.get()).write(scheduler);
+                (&*local.get()).assume_init_ref().blocking_pool.run();
+            };
         });
     }
 
@@ -83,10 +87,15 @@ impl Scheduler {
                         self.handle_coroutine_state(selector, task);
                     }
 
+                    YieldStatus::TcpConnect(status) => {
+                        let state = BlockingState::new_connect_tcp(status.address, task, status.stream_ptr);
+                        self.blocking_pool.put_state(state);
+                    }
+
                     YieldStatus::TcpAccept(status) => {
                         let state_ptr = status.state_ref;
                         let state_ref = unsafe { state_ptr.as_ref() };
-                        unsafe { state_ptr.write(State::new_accept_tcp(state_ref.fd(), task, status.result_ptr)) };
+                        unsafe { state_ptr.write(PollState::new_accept_tcp(state_ref.fd(), task, status.result_ptr)) };
                         if selector.need_reregister() || !status.is_registered {
                             selector.register(state_ptr);
                         }
@@ -95,7 +104,7 @@ impl Scheduler {
                     YieldStatus::TcpRead(status) => {
                         let state_ptr = status.state_ref;
                         let state_ref = unsafe { state_ptr.as_ref() };
-                        unsafe { state_ptr.write(State::new_poll_tcp(state_ref.fd(), task, status.result_ptr)) };
+                        unsafe { state_ptr.write(PollState::new_poll_tcp(state_ref.fd(), task, status.result_ptr)) };
                         if selector.need_reregister() || !status.is_registered {
                             selector.register(state_ptr);
                         }
@@ -105,27 +114,39 @@ impl Scheduler {
                         let state_ptr = status.state_ref;
                         let state_ref = unsafe { state_ptr.as_ref() };
                         let fd = state_ref.fd();
-                        unsafe { state_ptr.write(State::new_write_tcp(fd, status.buffer, task, status.result_ptr)) };
+                        unsafe { state_ptr.write(PollState::new_write_tcp(fd, status.buffer, task, status.result_ptr)) };
                         selector.write(state_ptr);
                     }
 
                     YieldStatus::TcpWriteAll(status) => {
                         let state_ptr = status.state_ref;
                         let state_ref = unsafe { state_ptr.as_ref() };
-                        unsafe { state_ptr.write(State::new_write_all_tcp(state_ref.fd(), status.buffer, task, status.result_ptr)) };
+                        unsafe { state_ptr.write(PollState::new_write_all_tcp(state_ref.fd(), status.buffer, task, status.result_ptr)) };
                         selector.write_all(state_ptr);
                     }
 
                     YieldStatus::TcpClose(status) => {
                         let state_ptr = status.state_ptr;
                         let state_ref = unsafe { state_ptr.as_mut() };
-                        unsafe { state_ptr.write(State::new_close_tcp(state_ref.fd(), task)) };
+                        unsafe { state_ptr.write(PollState::new_close_tcp(state_ref.fd(), task)) };
                         selector.close_connection(state_ptr);
                         //self.handle_coroutine_state(selector, task);
                     }
                 }
             }
             CoroutineState::Complete(_) => {}
+        }
+    }
+
+    #[inline(always)]
+    fn process_ready_coroutines<S: Selector>(&mut self, selector: &mut S) {
+        self.blocking_pool.get_ready(&mut self.ready_coroutines);
+        let ptr = self.ready_coroutines.as_ptr();
+        unsafe {
+            for i in 0..self.ready_coroutines.len() {
+                self.handle_coroutine_state(selector, ptr.add(i).read());
+            }
+            self.ready_coroutines.set_len(0);
         }
     }
 
@@ -143,6 +164,7 @@ impl Scheduler {
         self.sched(new_coroutine!({
             let scheduler = local_scheduler();
             loop {
+                scheduler.process_ready_coroutines(selector_ref);
                 scheduler.awake_coroutines();
                 selector_ref.poll(scheduler).expect("Poll error");
                 yield YieldStatus::Yield;

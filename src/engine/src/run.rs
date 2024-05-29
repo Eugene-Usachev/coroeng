@@ -1,9 +1,12 @@
+use std::ptr::null_mut;
 use crate::{cfg, local_scheduler};
+use crate::buf::BufPool;
 use crate::coroutine::{CoroutineImpl};
 use crate::local::id::set_worker_id_and_core_id;
-use crate::local::{Scheduler};
-use crate::utils::{BufPool, core};
+use crate::scheduler::{Scheduler};
+use crate::utils::{core};
 
+// TODO new docs
 /// Runs the [`Scheduler`] with the provided coroutine on the current core.
 /// This function will block the current thread.
 ///
@@ -57,13 +60,13 @@ use crate::utils::{BufPool, core};
 ///     run_on_core(print_hello("main".to_string()), core);
 /// }
 /// ```
-pub fn run_on_core(coroutine: CoroutineImpl, core: core::CoreId) {
+pub fn run_on_core<T, C: 'static + Send + Clone + Fn(*mut T) -> CoroutineImpl>(creator: C, core: core::CoreId) {
     core::set_for_current(core);
     set_worker_id_and_core_id(core.id + 1, core.id);
     BufPool::init(cfg::config_buf_len());
     Scheduler::init();
     let scheduler = local_scheduler();
-    scheduler.run(coroutine);
+    scheduler.run(creator(null_mut()));
 }
 
 /// Takes a function that returns a coroutine and call this function on all cores with [`run_on_core`].
@@ -102,9 +105,9 @@ pub fn run_on_all_cores<T, C: 'static + Send + Clone + Fn(*mut T) -> CoroutineIm
         std::thread::Builder::new()
             .name(format!("worker on core: {}", i))
             .spawn(move || {
-                run_on_core(creator(std::ptr::null_mut()), core);
+                run_on_core(creator, core);
             }).expect("failed to create worker thread");
     }
 
-    run_on_core(creator(std::ptr::null_mut()), cores[0]);
+    run_on_core(creator, cores[0]);
 }

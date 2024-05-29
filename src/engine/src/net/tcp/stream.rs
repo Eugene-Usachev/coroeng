@@ -1,10 +1,12 @@
 //! This module contains [`TcpStream`].
 use std::io::Error;
+use std::net::SocketAddr;
 use std::os::fd::RawFd;
 use crate::coroutine::{CoroutineImpl, YieldStatus};
-use crate::io::State;
+use crate::io::PollState;
 use crate::{local_scheduler};
-use crate::utils::{Buffer, Ptr};
+use crate::buf::Buffer;
+use crate::utils::Ptr;
 
 // TODO docs for connect. Here we can add reference to docs in TcpListener
 /// A TCP stream between a local and a remote socket.
@@ -58,7 +60,7 @@ use crate::utils::{Buffer, Ptr};
 /// ```
 pub struct TcpStream {
     is_registered: bool,
-    data: Ptr<State>
+    data: Ptr<PollState>
 }
 
 impl TcpStream {
@@ -66,15 +68,21 @@ impl TcpStream {
     pub fn new(fd: RawFd) -> Self {
         Self {
             is_registered: false,
-            data: Ptr::new(State::new_empty(fd))
+            data: Ptr::new(PollState::new_empty(fd))
         }
+    }
+
+    // TODO more docs
+    /// Connects to the specified address.
+    pub fn connect(addr: SocketAddr, res: *mut Result<TcpStream, Error>) -> YieldStatus {
+        YieldStatus::tcp_connect(addr, res)
     }
 
     /// Returns the state_ptr of the [`TcpStream`].
     ///
     /// Uses for low-level work with the scheduler. If you don't know what it is, don't use it.
     #[inline(always)]
-    pub fn state_ptr(&mut self) -> Ptr<State> {
+    pub fn state_ptr(&mut self) -> Ptr<PollState> {
         self.data
     }
 
@@ -107,7 +115,7 @@ impl TcpStream {
     /// use engine::coro;
     /// use engine::net::TcpStream;
     /// use std::io::Error;
-    /// use engine::utils::{buffer, Buffer};
+    /// use engine::buf::{buffer, Buffer};
     ///
     /// #[coro]
     /// fn handle_tcp_client(mut stream: TcpStream) {
@@ -227,12 +235,12 @@ impl TcpStream {
     }
 
     /// Closes the stream.
-    fn close(state_ref: Ptr<State>) -> YieldStatus {
+    fn close(state_ref: Ptr<PollState>) -> YieldStatus {
         YieldStatus::tcp_close(state_ref)
     }
 }
 
-fn close_stream(state_ref: Ptr<State>) -> CoroutineImpl {
+fn close_stream(state_ref: Ptr<PollState>) -> CoroutineImpl {
     Box::pin(#[coroutine] static move || {
         yield TcpStream::close(state_ref);
         unsafe { state_ref.drop_in_place(); }

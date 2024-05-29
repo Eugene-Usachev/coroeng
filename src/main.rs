@@ -32,10 +32,11 @@ use std::net::ToSocketAddrs;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::SeqCst;
 use std::time::Duration;
-use engine::{coro, run_on_all_cores, spawn_local, wait};
+use engine::{coro, run_on_all_cores, run_on_core, spawn_local, wait};
 use engine::net::{TcpListener, TcpStream};
 use engine::sleep::sleep;
-use engine::buf::Buffer;
+use engine::buf::{Buffer, buffer};
+use engine::utils::get_core_ids;
 
 fn docs() {
     #[coro]
@@ -54,8 +55,9 @@ fn docs() {
         }
         42
     }
+
     #[coro]
-    fn handle_tcp_stream(mut stream: TcpStream) {
+    fn handle_tcp_stream(stream: TcpStream) {
         let res = wait!(difficult_write(stream, engine::buf::buffer()));
         println!("{}", res);
     }
@@ -77,6 +79,95 @@ fn docs() {
     }
 
     run_on_all_cores(start_server);
+}
+
+#[coro]
+fn ping_pong() {
+    static C: AtomicUsize = AtomicUsize::new(0);
+    #[coro]
+    fn client() {
+        let mut stream_ = yield TcpStream::connect("engine:8082".to_socket_addrs().unwrap().next().unwrap());
+        if stream_.is_err() {
+            println!("connect failed, reason: {}", stream_.err().unwrap());
+            return;
+        }
+
+        let mut stream: TcpStream = stream_.unwrap();
+        unsafe {
+            println!("connected: {}, fd: {}", C.fetch_add(1, SeqCst) + 1, stream.state_ptr().as_ref().fd());
+        }
+        let mut buf: Buffer;
+        let mut res: Result<&[u8], Error>;
+
+        loop {
+            buf = buffer();
+            buf.append(b"ping");
+            yield stream.write(buf);
+
+            res = yield stream.read();
+            if res.is_err() {
+                println!("read failed, reason: {:?}", res.unwrap_err());
+                break;
+            }
+
+            let res = res.unwrap();
+
+            if res == b"pong" {
+                println!("Pong has been received");
+                yield sleep(Duration::from_secs(2));
+            } else {
+                println!("Pong has not been received!, received: {:?}", String::from_utf8(res.to_vec()).unwrap());
+                break;
+            }
+        }
+    }
+
+    #[coro]
+    fn server() {
+        #[coro]
+        fn handle_tcp_client(mut stream: TcpStream) {
+            loop {
+                let slice: &[u8] = (yield stream.read()).unwrap();
+
+                if slice != b"ping" {
+                    println!("received: {:?}", slice);
+                    break;
+                }
+
+                let mut buf = engine::buf::buffer();
+                buf.append(b"pong");
+
+                let res: Result<(), Error> = yield stream.write_all(buf);
+
+                if res.is_err() {
+                    println!("write failed, reason: {}", res.err().unwrap());
+                    break;
+                }
+            }
+        }
+
+        let mut listener: TcpListener = yield TcpListener::new("engine:8082".to_socket_addrs().unwrap().next().unwrap());
+        unsafe {
+            println!("listener is created, fd: {}", listener.state_ptr().as_ref().fd());
+        }
+
+        loop {
+            let stream_ = yield listener.accept();
+            if stream_.is_err() {
+                println!("accept failed, reason: {}", stream_.err().unwrap());
+                continue;
+            }
+            let stream: TcpStream = stream_.unwrap();
+            spawn_local!(handle_tcp_client(stream));
+        }
+    }
+
+    spawn_local!(server());
+    yield sleep(Duration::from_secs(1));
+
+    for i in 0..20000 {
+        spawn_local!(client());
+    }
 }
 
 fn tcp_benchmark() {
@@ -143,6 +234,6 @@ fn benchmark_sleep() {
 }
 
 fn main() {
-    docs();
+    run_on_core(ping_pong, get_core_ids().unwrap()[0]);
 }
 

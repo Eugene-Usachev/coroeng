@@ -10,6 +10,7 @@ use crate::io::sys::unix::epoll::check_error::check_error;
 /// The value of `SO_REUSEADDR`, `TcpNoDelay` and `SO_REUSEPORT`
 const OPTVAL: bool = true;
 
+// TODO result
 /// Returns [`OwnedFd`] for the configured tcp listener.
 #[inline]
 pub(crate) fn get_tcp_listener_fd(socket_addr: SocketAddr) -> OwnedFd {

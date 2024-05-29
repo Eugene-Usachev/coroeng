@@ -3,9 +3,10 @@
 
 use std::net::SocketAddr;
 use std::time::Duration;
-use crate::io::State;
+use crate::io::PollState;
 use crate::net::{TcpListener, TcpStream};
-use crate::utils::{Buffer, Ptr};
+use crate::buf::{Buffer};
+use crate::utils::Ptr;
 
 /// Represents a new TCP listener to be created.
 #[derive(Debug)]
@@ -16,13 +17,22 @@ pub struct NewTcpListener {
     pub(crate) listener_ptr: *mut TcpListener,
 }
 
+/// Represent a TCP connect operation.
+#[derive(Debug)]
+pub struct TcpConnect {
+    /// The address on which the TCP listener will listen.
+    pub(crate) address: SocketAddr,
+    /// Pointer to store the newly created [`TcpStream`].
+    pub(crate) stream_ptr: *mut Result<TcpStream, std::io::Error>,
+}
+
 /// Represents a TCP accept operation.
 #[derive(Debug)]
 pub struct TcpAccept {
     /// Indicates whether the socket is registered to the selector.
     pub(crate) is_registered: bool,
     /// The state ID associated with the TCP accept operation.
-    pub(crate) state_ref: Ptr<State>,
+    pub(crate) state_ref: Ptr<PollState>,
     /// Pointer to store the result of the TCP accept operation.
     /// If success, the result will contain a [`TcpStream`].
     pub(crate) result_ptr: *mut Result<TcpStream, std::io::Error>,
@@ -34,7 +44,7 @@ pub struct TcpRead {
     /// Indicates whether the socket is registered to the selector.
     pub(crate) is_registered: bool,
     /// The state ID associated with the TCP read operation.
-    pub(crate) state_ref: Ptr<State>,
+    pub(crate) state_ref: Ptr<PollState>,
     /// Pointer to store the result of the TCP read operation.
     /// If success, the result will contain a slice of bytes read.
     pub(crate) result_ptr: *mut Result<&'static [u8], std::io::Error>,
@@ -44,7 +54,7 @@ pub struct TcpRead {
 #[derive(Debug)]
 pub struct TcpWrite {
     /// The state ID associated with the TCP write operation.
-    pub(crate) state_ref: Ptr<State>,
+    pub(crate) state_ref: Ptr<PollState>,
     /// The buffer containing data to be written.
     pub(crate) buffer: Buffer,
     /// Pointer to store the result of the TCP write operation.
@@ -56,7 +66,7 @@ pub struct TcpWrite {
 #[derive(Debug)]
 pub struct TcpWriteAll {
     /// The state ID associated with the TCP write all operation.
-    pub(crate) state_ref: Ptr<State>,
+    pub(crate) state_ref: Ptr<PollState>,
     /// The buffer containing data to be written.
     pub(crate) buffer: Buffer,
     /// Pointer to store the result of the TCP write all operation.
@@ -68,7 +78,7 @@ pub struct TcpWriteAll {
 #[derive(Debug)]
 pub struct TcpClose {
     /// The state ID associated with the TCP close operation.
-    pub(crate) state_ptr: Ptr<State>,
+    pub(crate) state_ptr: Ptr<PollState>,
 }
 
 /// The status of the coroutine yield. This is the one way to communicate with the scheduler.
@@ -80,6 +90,7 @@ pub enum YieldStatus {
     /// If yielded, the coroutine let the scheduler wake other coroutines up.
     /// The current coroutine will be woken up by the scheduler after all other coroutines.
     Yield,
+
     /// [`Sleep`] takes the duration.
     ///
     /// # Arguments
@@ -93,6 +104,11 @@ pub enum YieldStatus {
     ///
     /// If yielded, the new listener will be stored in the pointer.
     NewTcpListener(NewTcpListener),
+
+    /// [`TcpConnect`] takes the address and a pointer.
+    ///
+    /// If yielded, the new connection will be stored in the pointer.
+    TcpConnect(TcpConnect),
 
     /// [`TcpAccept`] takes is registered to the selector, a state id and a result pointer.
     ///
@@ -147,28 +163,33 @@ impl YieldStatus {
         YieldStatus::NewTcpListener(NewTcpListener { address, listener_ptr })
     }
 
+    /// Create a YieldStatus variant [`TcpConnect`].
+    pub fn tcp_connect(address: SocketAddr, result_ptr: *mut Result<TcpStream, std::io::Error>) -> Self {
+        YieldStatus::TcpConnect(TcpConnect { address, stream_ptr: result_ptr })
+    }
+
     /// Create a YieldStatus variant [`TcpAccept`].
-    pub fn tcp_accept(is_registered: bool, state_ref: Ptr<State>, result_ptr: *mut Result<TcpStream, std::io::Error>) -> Self {
+    pub fn tcp_accept(is_registered: bool, state_ref: Ptr<PollState>, result_ptr: *mut Result<TcpStream, std::io::Error>) -> Self {
         YieldStatus::TcpAccept(TcpAccept { is_registered, state_ref, result_ptr })
     }
 
     /// Create a YieldStatus variant [`TcpRead`].
-    pub fn tcp_read(is_registered: bool, state_ref: Ptr<State>, result_ptr: *mut Result<&'static [u8], std::io::Error>) -> Self {
+    pub fn tcp_read(is_registered: bool, state_ref: Ptr<PollState>, result_ptr: *mut Result<&'static [u8], std::io::Error>) -> Self {
         YieldStatus::TcpRead(TcpRead { is_registered, state_ref, result_ptr })
     }
 
     /// Create a YieldStatus variant [`TcpWrite`].
-    pub fn tcp_write(state_ref: Ptr<State>, buffer: Buffer, result_ptr: *mut Result<Option<Buffer>, std::io::Error>) -> Self {
+    pub fn tcp_write(state_ref: Ptr<PollState>, buffer: Buffer, result_ptr: *mut Result<Option<Buffer>, std::io::Error>) -> Self {
         YieldStatus::TcpWrite(TcpWrite { state_ref, buffer, result_ptr })
     }
 
     /// Create a YieldStatus variant [`TcpWriteAll`].
-    pub fn tcp_write_all(state_ref: Ptr<State>, buffer: Buffer, result_ptr: *mut Result<(), std::io::Error>) -> Self {
+    pub fn tcp_write_all(state_ref: Ptr<PollState>, buffer: Buffer, result_ptr: *mut Result<(), std::io::Error>) -> Self {
         YieldStatus::TcpWriteAll(TcpWriteAll { state_ref, buffer, result_ptr })
     }
 
     /// Create a YieldStatus variant [`TcpClose`].
-    pub fn tcp_close(state_ref: Ptr<State>) -> Self {
+    pub fn tcp_close(state_ref: Ptr<PollState>) -> Self {
         YieldStatus::TcpClose(TcpClose { state_ptr: state_ref })
     }
 }

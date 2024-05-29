@@ -2,7 +2,6 @@ use std::fmt::Debug;
 use std::intrinsics::unlikely;
 use std::mem;
 use crate::buf::buf_pool::buf_pool;
-use crate::buf::BufPool;
 
 /// Buffer for data transfer. Buffer is allocated in heap.
 ///
@@ -11,14 +10,14 @@ use crate::buf::BufPool;
 /// - `written` is how many bytes have been written into the buffer. For "usual" user it is length of the buffer.
 ///
 /// - `offset` is how many bytes have been read from the buffer. For example, it is used in [`TcpStream::write`](crate::net::TcpStream::write).
-/// Used it only if you know what you are doing. In most cases it is need only for inner work.
+/// Use it only if you know what you are doing. In most cases it is need only for inner work.
 /// 
 /// # About pool
 /// 
-/// For get from [`BufPool`] call [`buffer`](crate::buf::buffer).
-/// If you can use [`BufPool`], use it, to have better performance.
+/// For get from [`BufPool`](crate::buf::BufPool) call [`buffer`](crate::buf::buffer).
+/// If you can use [`BufPool`](crate::buf::BufPool), use it, to have better performance.
 ///
-/// If it was gotten from [`BufPool`] it will come back after drop.
+/// If it was gotten from [`BufPool`](crate::buf::BufPool) it will come back after drop.
 ///
 /// # Buffer representation
 ///
