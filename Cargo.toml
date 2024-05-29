@@ -7,3 +7,6 @@ edition = "2024"
 
 [dependencies]
 engine = { path = "./src/engine" }
+# TODO r
+io-uring = "0.6.4"
+libc = "0.2.155"

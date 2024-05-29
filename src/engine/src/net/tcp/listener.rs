@@ -82,8 +82,9 @@ impl TcpListener {
         self.state_ptr
     }
 
+    // TODO remove pub
     /// Returns the fd for the [`TcpListener`].
-    pub(crate) fn get_fd(addr: SocketAddr) -> RawFd {
+    pub fn get_fd(addr: SocketAddr) -> RawFd {
         get_tcp_listener_fd(addr).into_raw_fd()
     }
 

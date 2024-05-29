@@ -31,8 +31,7 @@ pub struct BufPool {
 
 impl BufPool {
     /// Initialize [`BufPool`] in local thread.
-    // TODO init in all program if needed, not only in run_on_cores
-    pub(crate) fn init(buffer_len: usize) {
+    pub fn init_in_local_thread(buffer_len: usize) {
         BUF_POOL.with(|pool| {
             let pool_ref = unsafe { (&mut *pool.get()).assume_init_mut() };
             *pool_ref = BufPool {

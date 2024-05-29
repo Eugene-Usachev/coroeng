@@ -22,7 +22,7 @@ impl SchedulerCfg {
     pub const fn default() -> Self {
         Self {
             buf_len: 4096,
-            selector: SelectorType::Poller
+            selector: SelectorType::Ring
         }
     }
 }

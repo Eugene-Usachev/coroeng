@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 use std::{ptr};
 use std::alloc::{alloc, dealloc, Layout};
+use std::intrinsics::likely;
 
 /// A pointer wrapper.
 pub struct Ptr<T> {
@@ -72,14 +73,9 @@ impl<T> Ptr<T> {
     }
 
     /// Drop the value.
-    ///
-    /// # Panics
-    ///
-    /// If the pointer is null.
     #[inline(always)]
     pub unsafe fn drop_in_place(self) {
         if self.ptr.is_null() {
-            println!("ptr is null");
             return;
         }
 
@@ -95,6 +91,10 @@ impl<T> Ptr<T> {
     /// If the pointer is null.
     #[inline(always)]
     pub unsafe fn read(self) -> T {
+        if self.ptr.is_null() {
+            panic!("ptr is null");
+        }
+
         unsafe { ptr::read(self.ptr) }
     }
 
@@ -103,9 +103,35 @@ impl<T> Ptr<T> {
     /// # Panics
     ///
     /// If the pointer is null.
+    ///
+    /// #  Write with drop
+    ///
+    /// Call [`Ptr::write_with_drop`] instead.
     #[inline(always)]
     pub unsafe fn write(self, value: T) {
+        if self.ptr.is_null() {
+            panic!("ptr is null");
+        }
+
         unsafe { ptr::write(self.ptr, value) }
+    }
+
+    /// Set the value. Drops the old value.
+    ///
+    /// # Panics
+    ///
+    /// If the pointer is null.
+    ///
+    /// #  Write no drop
+    ///
+    /// Call [`Ptr::write`] instead.
+    #[inline(always)]
+    pub unsafe fn write_with_drop(self, value: T) {
+        if self.ptr.is_null() {
+            panic!("ptr is null");
+        }
+
+        unsafe { ptr::replace(self.ptr, value) };
     }
 }
 

@@ -79,39 +79,39 @@ impl PollState {
         }
     }
 
-    pub(crate) fn new_empty(fd: RawFd) -> Self {
+    pub fn new_empty(fd: RawFd) -> Self {
         PollState::Empty(EmptyState { fd })
     }
 
     #[inline(always)]
-    pub(crate) fn new_accept_tcp(listener: RawFd, coroutine: CoroutineImpl, result: *mut Result<TcpStream, Error>) -> Self {
+    pub fn new_accept_tcp(listener: RawFd, coroutine: CoroutineImpl, result: *mut Result<TcpStream, Error>) -> Self {
         PollState::AcceptTcp(Box::new(AcceptTcpState { fd: listener, coroutine, result }))
     }
 
     #[inline(always)]
-    pub(crate) fn new_poll_tcp(stream: RawFd, coroutine: CoroutineImpl, result: *mut Result<&'_ [u8], Error>) -> Self {
+    pub fn new_poll_tcp(stream: RawFd, coroutine: CoroutineImpl, result: *mut Result<&'_ [u8], Error>) -> Self {
         let result = unsafe { std::mem::transmute(result) };
         PollState::PollTcp(Box::new(PollTcpState { fd: stream, coroutine, result }))
     }
 
     #[inline(always)]
-    pub(crate) fn new_read_tcp(stream: RawFd, buf: Buffer, coroutine: CoroutineImpl, result: *mut Result<&'_ [u8], Error>) -> Self {
+    pub fn new_read_tcp(stream: RawFd, buf: Buffer, coroutine: CoroutineImpl, result: *mut Result<&'_ [u8], Error>) -> Self {
         let result = unsafe { std::mem::transmute(result) };
         PollState::ReadTcp(Box::new(ReadTcpState { fd: stream, buffer: buf, coroutine, result }))
     }
 
     #[inline(always)]
-    pub(crate) fn new_write_tcp(stream: RawFd, buf: Buffer, coroutine: CoroutineImpl, result: *mut Result<Option<Buffer>, Error>) -> Self {
+    pub fn new_write_tcp(stream: RawFd, buf: Buffer, coroutine: CoroutineImpl, result: *mut Result<Option<Buffer>, Error>) -> Self {
         PollState::WriteTcp(Box::new(WriteTcpState { fd: stream, buffer: buf, coroutine, result }))
     }
 
     #[inline(always)]
-    pub(crate) fn new_write_all_tcp(stream: RawFd, buf: Buffer, coroutine: CoroutineImpl, result: *mut Result<(), Error>) -> Self {
+    pub fn new_write_all_tcp(stream: RawFd, buf: Buffer, coroutine: CoroutineImpl, result: *mut Result<(), Error>) -> Self {
         PollState::WriteAllTcp(Box::new(WriteAllTcpState { fd: stream, buffer: buf, coroutine, result }))
     }
 
     #[inline(always)]
-    pub(crate) fn new_close_tcp(stream: RawFd, coroutine: CoroutineImpl) -> Self {
+    pub fn new_close_tcp(stream: RawFd, coroutine: CoroutineImpl) -> Self {
         PollState::CloseTcp(Box::new(CloseTcpState { fd: stream, coroutine }))
     }
 }

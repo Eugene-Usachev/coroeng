@@ -63,7 +63,7 @@ use crate::utils::{core};
 pub fn run_on_core<T, C: 'static + Send + Clone + Fn(*mut T) -> CoroutineImpl>(creator: C, core: core::CoreId) {
     core::set_for_current(core);
     set_worker_id_and_core_id(core.id + 1, core.id);
-    BufPool::init(cfg::config_buf_len());
+    BufPool::init_in_local_thread(cfg::config_buf_len());
     Scheduler::init();
     let scheduler = local_scheduler();
     scheduler.run(creator(null_mut()));

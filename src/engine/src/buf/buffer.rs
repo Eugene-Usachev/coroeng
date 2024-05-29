@@ -14,10 +14,10 @@ use crate::buf::buf_pool::buf_pool;
 /// 
 /// # About pool
 /// 
-/// For get from [`BufPool`](crate::buf::BufPool) call [`buffer`](crate::buf::buffer).
-/// If you can use [`BufPool`](crate::buf::BufPool), use it, to have better performance.
+/// For get from [`BufPool`] call [`buffer`](crate::buf::buffer).
+/// If you can use [`BufPool`], use it, to have better performance.
 ///
-/// If it was gotten from [`BufPool`](crate::buf::BufPool) it will come back after drop.
+/// If it was gotten from [`BufPool`] it will come back after drop.
 ///
 /// # Buffer representation
 ///
@@ -34,6 +34,8 @@ use crate::buf::buf_pool::buf_pool;
 /// written = 5 (from 1 to 5 inclusive)
 /// 5 blocks occupied (X), 3 blocks free (blank)
 /// ```
+/// 
+/// [`BufPool`]: crate::buf::BufPool
 pub struct Buffer {
     slice: Box<[u8]>,
     written: usize,

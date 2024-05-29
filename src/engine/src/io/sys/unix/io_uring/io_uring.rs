@@ -5,10 +5,13 @@ use std::cell::UnsafeCell;
 use std::os::fd::RawFd;
 use io_uring::{cqueue, IoUring, opcode, squeue, types};
 use io_uring::types::{SubmitArgs, Timespec};
+use libc::{F_SETFL, O_NONBLOCK, SYS_fcntl, syscall};
 use crate::io::{Selector, PollState};
 use crate::scheduler::Scheduler;
 use crate::net::TcpStream;
 use crate::{buf, write_ok};
+use crate::io::sys::unix::check_error::check_error;
+use crate::io::sys::unix::net::set_nonblocking;
 use crate::utils::{hide_mut_unsafe, Ptr};
 
 pub(crate) struct IoUringSelector {
