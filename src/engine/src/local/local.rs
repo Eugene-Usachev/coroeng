@@ -31,6 +31,10 @@ impl<T> Local<T> {
 
     #[inline(always)]
     fn inc_counter(&self) {
+        if self.worker_id != get_worker_id() {
+            panic!("Tried to inc_counter from another worker!");
+        }
+
         unsafe {
             *&mut *self.counter.as_ptr() += 1;
         }
@@ -38,6 +42,10 @@ impl<T> Local<T> {
 
     #[inline(always)]
     fn dec_counter(&self) -> usize {
+        if self.worker_id != get_worker_id() {
+            panic!("Tried to dec_counter from another worker!");
+        }
+
         unsafe {
             let reference = &mut *self.counter.as_ptr();
             let new = *reference - 1;
@@ -146,11 +154,29 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "Tried to inc_counter from another worker!")]
+    fn test_inc_counter_panic_on_wrong_worker_id() {
+        set_worker_id(1);
+        let local = Local::new(5);
+        set_worker_id(2);
+        local.inc_counter();
+    }
+
+    #[test]
     fn test_inc_counter() {
         set_worker_id(1);
         let local = Local::new(5);
         local.inc_counter();
         assert_eq!(unsafe { *local.counter.as_ptr() }, 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "Tried to dec_counter from another worker!")]
+    fn test_dec_counter_panic_on_wrong_worker_id() {
+        set_worker_id(1);
+        let local = Local::new(5);
+        set_worker_id(2);
+        local.dec_counter();
     }
 
     #[test]
