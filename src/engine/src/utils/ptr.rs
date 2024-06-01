@@ -1,7 +1,6 @@
 use std::fmt::Debug;
 use std::{ptr};
 use std::alloc::{alloc, dealloc, Layout};
-use std::intrinsics::likely;
 
 /// A pointer wrapper.
 pub struct Ptr<T> {

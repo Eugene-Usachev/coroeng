@@ -37,7 +37,7 @@ use crate::buf::buf_pool::buf_pool;
 /// 
 /// [`BufPool`]: crate::buf::BufPool
 pub struct Buffer {
-    slice: Box<[u8]>,
+    pub(crate) slice: Box<[u8]>,
     written: usize,
     offset: usize,
     pub(crate) from_pool: bool
@@ -70,11 +70,11 @@ impl Buffer {
         }
     }
 
-    /// Returns how many bytes have been written into the buffer.
-    /// For "usual" user it is length of the buffer.
+    /// Returns how many bytes have been written into the buffer, exclusive offset.
+    /// So, it is `written` - `offset`.
     #[inline(always)]
     pub fn len(&self) -> usize {
-        self.written
+        self.written - self.offset
     }
 
     /// Returns how many bytes have been read from the buffer.

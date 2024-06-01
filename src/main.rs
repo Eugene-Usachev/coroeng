@@ -39,7 +39,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::SeqCst;
 use std::time::Duration;
 use io_uring::types::{SubmitArgs, Timespec};
-use engine::{coro, run_on_all_cores, spawn_local, wait};
+use engine::{coro, run_on_all_cores, run_on_core, spawn_local, wait};
 use engine::net::{TcpListener, TcpStream};
 use engine::sleep::sleep;
 use engine::buf::{buf_pool, Buffer, buffer, BufPool};
@@ -243,8 +243,8 @@ fn benchmark_sleep() {
 
 fn main() {
     //io_uring();
-    tcp_benchmark();
-    //run_on_core(ping_pong, get_core_ids().unwrap()[0]);
+    //tcp_benchmark();
+    run_on_core(ping_pong, get_core_ids().unwrap()[0]);
 }
 
 // TODO r

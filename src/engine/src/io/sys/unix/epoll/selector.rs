@@ -66,6 +66,10 @@ impl EpolledSelector {
                 scheduler.handle_coroutine_state(self, state.coroutine);
             }
 
+            PollState::ConnectTcp(_state) => {
+                todo!();
+            }
+
             PollState::PollTcp(state) => {
                 let res = recvfrom::<()>(state.fd, &mut self.req_buf);
                 if res.is_err() {
@@ -90,7 +94,7 @@ impl EpolledSelector {
 
                 if res.is_ok() {
                     let written = unsafe { res.unwrap_unchecked() };
-                    if written == state.buffer.len() - state.buffer.offset() {
+                    if written == state.buffer.len() {
                         write_ok!(state.result, None);
                     } else {
                         state.buffer.set_offset(state.buffer.offset() + written);
@@ -106,7 +110,6 @@ impl EpolledSelector {
             PollState::WriteAllTcp(mut state) => {
                 let fd = state.fd;
                 let mut res;
-                let len = state.buffer.len();
                 loop {
                     res = unsafe { write(BorrowedFd::borrow_raw(fd), state.buffer.as_slice()) };
                     if unlikely(res.is_err()) {
@@ -116,7 +119,7 @@ impl EpolledSelector {
                     }
 
                     state.buffer.set_offset(state.buffer.offset() + unsafe { res.unwrap_unchecked() });
-                    if state.buffer.offset() == len {
+                    if state.buffer.len() == 0 {
                         break;
                     }
                 }

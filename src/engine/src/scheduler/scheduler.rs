@@ -4,15 +4,17 @@ use std::mem::{MaybeUninit, transmute};
 #[allow(unused_imports)] // compiler will complain if it's not used, but we need it for resume()
 use std::ops::{Coroutine, CoroutineState};
 use std::time::Instant;
+use nix::sys::socket::socket;
 use crate::cfg::{config_selector, SelectorType};
 use crate::coroutine::coroutine::{CoroutineImpl};
 use crate::coroutine::YieldStatus;
 use crate::io::sys::unix::{EpolledSelector, IoUringSelector};
 use crate::io::{Selector, PollState, BlockingState};
 use crate::net::{TcpListener};
-use crate::{new_coroutine};
+use crate::{new_coroutine, write_err};
 use crate::scheduler::blocking_pool::BlockingPool;
 use crate::sleep::SleepingCoroutine;
+use crate::utils::Ptr;
 
 thread_local! {
     pub static LOCAL_SCHEDULER: UnsafeCell<MaybeUninit<Scheduler>> = UnsafeCell::new(MaybeUninit::zeroed());
@@ -23,8 +25,8 @@ pub struct Scheduler {
     task_queue: VecDeque<CoroutineImpl>,
     sleeping: BTreeSet<SleepingCoroutine>,
 
-    blocking_pool: BlockingPool,
-    ready_coroutines: Vec<CoroutineImpl>
+    //blocking_pool: BlockingPool,
+    //ready_coroutines: Vec<CoroutineImpl>
 }
 
 impl Scheduler {
@@ -33,14 +35,14 @@ impl Scheduler {
             task_queue: VecDeque::with_capacity(8),
             sleeping: BTreeSet::new(),
 
-            blocking_pool: BlockingPool::new(),
-            ready_coroutines: Vec::with_capacity(8)
+            //blocking_pool: BlockingPool::new(),
+            //ready_coroutines: Vec::with_capacity(8)
         };
 
         LOCAL_SCHEDULER.with(|local| {
             unsafe {
                 (&mut *local.get()).write(scheduler);
-                (&*local.get()).assume_init_ref().blocking_pool.run();
+                //(&*local.get()).assume_init_ref().blocking_pool.run();
             };
         });
     }
@@ -88,8 +90,15 @@ impl Scheduler {
                     }
 
                     YieldStatus::TcpConnect(status) => {
-                        let state = BlockingState::new_connect_tcp(status.address, task, status.stream_ptr);
-                        self.blocking_pool.put_state(state);
+                        let state_ = PollState::new_connect_tcp(socket2::SockAddr::from(status.address), task, status.stream_ptr);
+                        if state_.is_err() {
+                            let (error, task) = unsafe { state_.unwrap_err_unchecked() };
+                            write_err!(status.stream_ptr, error);
+                            self.handle_coroutine_state(selector, task);
+                            return;
+                        }
+
+                        selector.register(unsafe {Ptr::new(state_.unwrap_unchecked())});
                     }
 
                     YieldStatus::TcpAccept(status) => {
@@ -138,17 +147,17 @@ impl Scheduler {
         }
     }
 
-    #[inline(always)]
-    fn process_ready_coroutines<S: Selector>(&mut self, selector: &mut S) {
-        self.blocking_pool.get_ready(&mut self.ready_coroutines);
-        let ptr = self.ready_coroutines.as_ptr();
-        unsafe {
-            for i in 0..self.ready_coroutines.len() {
-                self.handle_coroutine_state(selector, ptr.add(i).read());
-            }
-            self.ready_coroutines.set_len(0);
-        }
-    }
+    // #[inline(always)]
+    // fn process_ready_coroutines<S: Selector>(&mut self, selector: &mut S) {
+    //     //self.blocking_pool.get_ready(&mut self.ready_coroutines);
+    //     let ptr = self.ready_coroutines.as_ptr();
+    //     unsafe {
+    //         for i in 0..self.ready_coroutines.len() {
+    //             self.handle_coroutine_state(selector, ptr.add(i).read());
+    //         }
+    //         self.ready_coroutines.set_len(0);
+    //     }
+    // }
 
     pub fn run(&mut self, main_func: CoroutineImpl) {
         match config_selector() {
@@ -164,7 +173,7 @@ impl Scheduler {
         self.sched(new_coroutine!({
             let scheduler = local_scheduler();
             loop {
-                scheduler.process_ready_coroutines(selector_ref);
+                //scheduler.process_ready_coroutines(selector_ref);
                 scheduler.awake_coroutines();
                 selector_ref.poll(scheduler).expect("Poll error");
                 yield YieldStatus::Yield;

@@ -1,6 +1,8 @@
 use std::io::Error;
 use std::fmt::{Debug, Formatter};
+use std::io;
 use std::os::fd::{RawFd};
+use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use crate::coroutine::coroutine::CoroutineImpl;
 use crate::net::tcp::TcpStream;
 use crate::buf::Buffer;
@@ -11,6 +13,13 @@ pub struct EmptyState {
 
 pub struct AcceptTcpState {
     pub(crate) fd: RawFd,
+    pub(crate) coroutine: CoroutineImpl,
+    pub(crate) result: *mut Result<TcpStream, Error>
+}
+
+pub struct ConnectTcpState {
+    pub(crate) address: SockAddr,
+    pub(crate) socket: Socket,
     pub(crate) coroutine: CoroutineImpl,
     pub(crate) result: *mut Result<TcpStream, Error>
 }
@@ -58,6 +67,7 @@ pub struct CloseTcpState {
 pub enum PollState {
     Empty(EmptyState),
     AcceptTcp(Box<AcceptTcpState>),
+    ConnectTcp(Box<ConnectTcpState>),
     PollTcp(Box<PollTcpState>),
     ReadTcp(Box<ReadTcpState>),
     WriteTcp(Box<WriteTcpState>),
@@ -76,6 +86,8 @@ impl PollState {
             PollState::WriteTcp(state) => { state.fd }
             PollState::WriteAllTcp(state) => { state.fd }
             PollState::CloseTcp(state) => { state.fd }
+
+            _ => { panic!("[BUG] tried to get fd from {self:?} token") }
         }
     }
 
@@ -86,6 +98,20 @@ impl PollState {
     #[inline(always)]
     pub fn new_accept_tcp(listener: RawFd, coroutine: CoroutineImpl, result: *mut Result<TcpStream, Error>) -> Self {
         PollState::AcceptTcp(Box::new(AcceptTcpState { fd: listener, coroutine, result }))
+    }
+
+    #[inline(always)]
+    pub fn new_connect_tcp(address: SockAddr, coroutine: CoroutineImpl, result: *mut Result<TcpStream, Error>) -> Result<Self, (Error, CoroutineImpl)> {
+        let socket_ = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP));
+        if socket_.is_err() {
+            unsafe {
+                return Err((socket_.unwrap_err_unchecked(), coroutine));
+            }
+        }
+
+        unsafe {
+            Ok(PollState::ConnectTcp(Box::new(ConnectTcpState { address, socket: socket_.unwrap_unchecked(), coroutine, result })))
+        }
     }
 
     #[inline(always)]
@@ -121,6 +147,13 @@ impl Debug for PollState {
         match self {
             PollState::Empty(state) => { write!(f, "Empty, fd: {}", state.fd) }
             PollState::AcceptTcp(state) => { write!(f, "AcceptTcp, fd: {}", state.fd) }
+            PollState::ConnectTcp(state) => {
+                write!(
+                    f,
+                    "ConnectTcp, addr: {:?}",
+                    state.address
+                )
+            }
             PollState::PollTcp(state) => { write!(f, "PollTcp, fd: {}", state.fd) }
             PollState::ReadTcp(state) => { write!(f, "ReadTcp, fd: {}", state.fd) }
             PollState::WriteTcp(state) => { write!(f, "WriteTcp, fd: {}", state.fd) }

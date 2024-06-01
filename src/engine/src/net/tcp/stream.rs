@@ -3,7 +3,7 @@ use std::io::Error;
 use std::net::SocketAddr;
 use std::os::fd::RawFd;
 use crate::coroutine::{CoroutineImpl, YieldStatus};
-use crate::io::PollState;
+use crate::io::{AsyncWrite, PollState};
 use crate::{local_scheduler};
 use crate::buf::Buffer;
 use crate::utils::Ptr;
@@ -21,6 +21,7 @@ use crate::utils::Ptr;
 /// use std::io::Error;
 /// use engine::net::TcpStream;
 /// use engine::{coro, spawn_local};
+/// use engine::io::AsyncWrite;
 ///
 /// #[coro]
 /// fn handle_tcp_client(mut stream: TcpStream) {
@@ -116,6 +117,7 @@ impl TcpStream {
     /// use engine::net::TcpStream;
     /// use std::io::Error;
     /// use engine::buf::{buffer, Buffer};
+    /// use engine::io::AsyncWrite;
     ///
     /// #[coro]
     /// fn handle_tcp_client(mut stream: TcpStream) {
@@ -171,72 +173,19 @@ impl TcpStream {
         YieldStatus::tcp_read(is_registered, self.data, res)
     }
 
-    /// Writes data to the stream.
-    /// Returns [`Option<Buffer>`] or an error.
-    /// If Option is [`None`], all data has been written.
-    /// Else `Buffer` contains new `offset` field, that indicates how many bytes have been written.
-    ///
-    /// # Note
-    ///
-    /// Don't worry about moving [`Buffer`]. In most cases buffer will be moved in [`BufPool`](crate::buf::BufPool).
-    /// So using [`buffer`](crate::buf::buffer) and moving the buffer is lead to reusing memory and avoiding allocations.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use engine::coro;
-    /// use engine::net::TcpStream;
-    /// use engine::buf::Buffer;
-    /// use std::io::Error;
-    ///
-    /// #[coro]
-    /// fn write_to_stream(mut stream: TcpStream, mut buf: Buffer) {
-    ///     loop {
-    ///         let res: Result<Option<Buffer>, Error> = yield stream.write(buf);
-    ///         if res.is_err() {
-    ///             println!("write failed, reason: {}", res.err().unwrap());
-    ///             break;
-    ///         }
-    ///
-    ///         if let Some(new_buf) = res.unwrap() {
-    ///             buf = new_buf;
-    ///         } else {
-    ///             break;
-    ///         }
-    ///     }
-    /// }
-    /// ```
-    pub fn write(&mut self, buf: Buffer, res: *mut Result<Option<Buffer>, Error>) -> YieldStatus {
-        YieldStatus::tcp_write(self.data, buf, res)
-    }
-
-    /// Writes all data to the stream or returns an error.
-    ///
-    /// # Example
-    ///
-    /// ```rust
-    /// use engine::coro;
-    /// use engine::net::TcpStream;
-    /// use engine::buf::Buffer;
-    /// use std::io::Error;
-    ///
-    /// #[coro]
-    /// fn write_to_stream(mut stream: TcpStream, mut buf: Buffer) {
-    ///     let res: Result<(), Error> = yield stream.write_all(buf);
-    ///     if res.is_err() {
-    ///         println!("write failed, reason: {}", res.err().unwrap());
-    ///         break;
-    ///     }
-    ///     // all data has been written
-    /// }
-    /// ```
-    pub fn write_all(&mut self, buf: Buffer, res: *mut Result<(), Error>) -> YieldStatus {
-        YieldStatus::tcp_write_all(self.data, buf, res)
-    }
-
     /// Closes the stream.
     fn close(state_ref: Ptr<PollState>) -> YieldStatus {
         YieldStatus::tcp_close(state_ref)
+    }
+}
+
+impl AsyncWrite<Buffer> for TcpStream {
+    fn write(&mut self, data: Buffer, res: *mut Result<Option<Buffer>, Error>) -> YieldStatus {
+        YieldStatus::tcp_write(self.data, data, res)
+    }
+
+    fn write_all(&mut self, data: Buffer, res: *mut Result<(), Error>) -> YieldStatus {
+        YieldStatus::tcp_write_all(self.data, data, res)
     }
 }
 
