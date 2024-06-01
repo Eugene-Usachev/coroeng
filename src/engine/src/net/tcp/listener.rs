@@ -23,7 +23,7 @@ use crate::utils::Ptr;
 /// use engine::net::tcp::TcpListener;
 /// use engine::{coro, spawn_local};
 /// use engine::net::TcpStream;
-/// use engine::io::AsyncWrite;
+/// use engine::io::{AsyncWrite, AsyncRead};
 ///
 /// #[coro]
 /// fn start_server() {
