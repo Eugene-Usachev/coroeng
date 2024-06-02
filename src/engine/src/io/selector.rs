@@ -2,7 +2,8 @@
 //!
 //! Selector is a trait for working with systems selectors like epoll, kqueue, io_uring etc.
 
-use std::os::fd::RawFd;
+use crate::import_fd_for_os;
+import_fd_for_os!();
 use crate::io::PollState;
 use crate::scheduler::Scheduler;
 use crate::utils::Ptr;

@@ -9,10 +9,14 @@ edition = "2024"
 crossbeam = "0.8.4"
 core_affinity = "0.8.1"
 crossbeam-utils = "0.8.20"
-nix = { version = "0.29.0", features = ["net", "event"] }
 libc = "0.2.155"
 socket2 = "0.5.7"
 cfg-if = "1.0.0"
 slab = "0.4.9"
-io-uring = "0.6.4"
 proc = { path = "./src/proc"}
+
+[target.'cfg(target_os = "linux")'.dependencies]
+io-uring = "0.6.4"
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29.0", features = ["net", "event"] }
