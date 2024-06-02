@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 use std::intrinsics::unlikely;
-use std::mem;
+use std::io::{Read, Write};
+use std::{cmp, mem};
 use crate::buf::buf_pool::buf_pool;
 
 /// Buffer for data transfer. Buffer is allocated in heap.
@@ -117,15 +118,6 @@ impl Buffer {
         self.written += len;
     }
 
-    /// Returns a slice of the buffer.
-    ///
-    /// # Note
-    ///
-    /// The slice is from `offset` to `written`.
-    pub fn as_slice(&self) -> &[u8] {
-        &self.slice[self.offset..self.written]
-    }
-
     /// Returns a pointer to the buffer.
     ///
     /// # Note
@@ -156,6 +148,38 @@ impl Buffer {
     }
 }
 
+impl Write for Buffer {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.append(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Read for Buffer {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let len = cmp::min(buf.len(), self.written - self.offset);
+        buf[..len].copy_from_slice(&self.slice[self.offset..self.offset + len]);
+        self.offset += len;
+        Ok(len)
+    }
+}
+
+impl AsRef<[u8]> for Buffer {
+    fn as_ref(&self) -> &[u8] {
+        &self.slice[self.offset..self.written]
+    }
+}
+
+impl AsMut<[u8]> for Buffer {
+    fn as_mut(&mut self) -> &mut [u8] {
+        &mut self.slice[self.offset..self.written]
+    }
+}
+
 impl Default for Buffer {
     fn default() -> Self {
         Buffer::new(0)
@@ -164,7 +188,7 @@ impl Default for Buffer {
 
 impl Debug for Buffer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.as_slice())
+        write!(f, "{:?}", self.as_ref())
     }
 }
 

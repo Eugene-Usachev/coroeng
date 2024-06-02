@@ -90,7 +90,7 @@ impl EpolledSelector {
 
             PollState::WriteTcp(mut state) => {
                 let fd = state.fd;
-                let res = unsafe { write(BorrowedFd::borrow_raw(fd), state.buffer.as_slice()) };
+                let res = unsafe { write(BorrowedFd::borrow_raw(fd), state.buffer.as_ref()) };
 
                 if res.is_ok() {
                     let written = unsafe { res.unwrap_unchecked() };
@@ -111,7 +111,7 @@ impl EpolledSelector {
                 let fd = state.fd;
                 let mut res;
                 loop {
-                    res = unsafe { write(BorrowedFd::borrow_raw(fd), state.buffer.as_slice()) };
+                    res = unsafe { write(BorrowedFd::borrow_raw(fd), state.buffer.as_ref()) };
                     if unlikely(res.is_err()) {
                         write_err!(state.result, Error::from(res.unwrap_err_unchecked()));
                         scheduler.handle_coroutine_state(self, state.coroutine);
