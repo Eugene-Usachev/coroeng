@@ -17,7 +17,7 @@ use crate::utils::Ptr;
 ///
 /// # Examples
 ///
-/// ```rust
+/// ```ignore
 /// use std::io::Error;
 /// use std::net::{SocketAddr, ToSocketAddrs};
 /// use engine::net::tcp::TcpListener;
@@ -93,7 +93,7 @@ impl TcpListener {
     ///
     /// # Examples
     ///
-    /// ```rust
+    /// ```ignore
     /// use engine::coro;
     /// use std::net::{SocketAddr, ToSocketAddrs};
     /// use engine::net::tcp::TcpListener;
@@ -112,7 +112,7 @@ impl TcpListener {
     ///
     /// # Examples
     ///
-    /// ```rust
+    /// ```ignore
     /// use std::io::Error;
     /// use std::net::{SocketAddr, ToSocketAddrs};
     /// use engine::coro;

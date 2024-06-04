@@ -4,19 +4,22 @@ use std::intrinsics::unlikely;
 use std::mem::{MaybeUninit, transmute};
 #[allow(unused_imports)] // compiler will complain if it's not used, but we need it for resume()
 use std::ops::{Coroutine, CoroutineState};
+use std::ptr::null_mut;
 use std::time::Instant;
+use proc::coro;
 use crate::cfg::{config_selector, SelectorType};
 use crate::coroutine::coroutine::{CoroutineImpl};
-use crate::coroutine::YieldStatus;
+use crate::coroutine::{yield_now, YieldStatus};
 use crate::io::sys::unix::{EpolledSelector, IoUringSelector};
 use crate::io::{Selector, PollState};
 use crate::net::{TcpListener};
-use crate::{new_coroutine, write_err};
+use crate::{write_err};
+use crate::run::uninit;
 use crate::sleep::SleepingCoroutine;
 use crate::utils::Ptr;
 
 thread_local! {
-    pub static LOCAL_SCHEDULER: UnsafeCell<MaybeUninit<Scheduler>> = UnsafeCell::new(MaybeUninit::zeroed());
+    pub static LOCAL_SCHEDULER: UnsafeCell<MaybeUninit<Scheduler>> = UnsafeCell::new(MaybeUninit::uninit());
 }
 
 // TODO docs
@@ -40,8 +43,16 @@ impl Scheduler {
 
         LOCAL_SCHEDULER.with(|local| {
             unsafe {
-                (&mut *local.get()).write(scheduler);
+                *(&mut *local.get()) = MaybeUninit::new(scheduler);
                 //(&*local.get()).assume_init_ref().blocking_pool.run();
+            };
+        });
+    }
+
+    pub fn uninit() {
+        LOCAL_SCHEDULER.with(|local| {
+            unsafe {
+                (&mut *local.get()).assume_init_drop();
             };
         });
     }
@@ -171,19 +182,22 @@ impl Scheduler {
         }
     }
 
+    #[coro(crate="crate")]
+    fn background_work<S: Selector>(selector_ref: &'static mut S) {
+        let scheduler = local_scheduler();
+        loop {
+            //scheduler.process_ready_coroutines(selector_ref);
+            scheduler.awake_coroutines();
+            selector_ref.poll(scheduler).expect("Poll error");
+            yield yield_now();
+        }
+    }
+
     fn run_with_selector<S: Selector + 'static>(&mut self, main_func: CoroutineImpl, mut selector: S) {
         self.task_queue.push_back(main_func);
         let selector_ref = unsafe { transmute::<&mut S, &'static mut S>(&mut selector) };
 
-        self.sched(new_coroutine!({
-            let scheduler = local_scheduler();
-            loop {
-                //scheduler.process_ready_coroutines(selector_ref);
-                scheduler.awake_coroutines();
-                selector_ref.poll(scheduler).expect("Poll error");
-                yield YieldStatus::Yield;
-            }
-        }));
+        self.sched(Self::background_work(selector_ref, null_mut()));
 
         let mut task_;
         let mut task;
@@ -196,6 +210,8 @@ impl Scheduler {
                 break;
             }
         }
+
+        uninit();
     }
 }
 

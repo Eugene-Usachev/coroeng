@@ -31,7 +31,17 @@ pub(crate) fn set_worker_id_and_core_id(worker_id: usize, core_id: usize) {
                 panic!("[BUG] Worker id can't be 0. Please report this issue.");
             }
             (&mut *thread_id.get()).write(worker_id);
+        } else {
+            panic!("[BUG] Double init worker id. Please report this issue.");
         }
     });
     CORE_ID.with(|thread_id| unsafe { (&mut *thread_id.get()).write(core_id) });
+}
+
+/// Set worker id and core id to zero.
+pub(crate) fn set_worker_id_and_core_id_to_zero() {
+    WORKER_ID.with(|thread_id| unsafe {
+        (&mut *thread_id.get()).write(0);
+    });
+    CORE_ID.with(|thread_id| unsafe { (&mut *thread_id.get()).write(0) });
 }

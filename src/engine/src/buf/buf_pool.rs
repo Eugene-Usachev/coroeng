@@ -5,7 +5,7 @@ use crate::buf::Buffer;
 
 thread_local! {
     /// Local [`BufPool`]. So, it is lockless.
-    pub static BUF_POOL: UnsafeCell<MaybeUninit<BufPool>> = UnsafeCell::new(MaybeUninit::zeroed());
+    pub static BUF_POOL: UnsafeCell<MaybeUninit<BufPool>> = UnsafeCell::new(MaybeUninit::uninit());
 }
 
 /// Get [`BufPool`] from thread local. So, it is lockless.
@@ -33,11 +33,18 @@ impl BufPool {
     /// Initialize [`BufPool`] in local thread.
     pub fn init_in_local_thread(buffer_len: usize) {
         BUF_POOL.with(|pool| {
-            let pool_ref = unsafe { (&mut *pool.get()).assume_init_mut() };
-            *pool_ref = BufPool {
+            let pool_ref = unsafe { &mut *pool.get() };
+            *pool_ref = MaybeUninit::new(BufPool {
                 pool: Vec::with_capacity(0),
                 buffer_len
-            };
+            });
+        });
+    }
+
+    /// Uninitialize [`BufPool`] in local thread.
+    pub(crate) fn uninit_in_local_thread() {
+        BUF_POOL.with(|pool| {
+            unsafe { (&mut *pool.get()).assume_init_drop()};
         });
     }
 

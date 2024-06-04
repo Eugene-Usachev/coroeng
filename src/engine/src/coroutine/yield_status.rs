@@ -91,7 +91,17 @@ pub enum YieldStatus {
     /// The current coroutine will be woken up by the scheduler after all other coroutines.
     Yield,
 
-    // TODO docs
+    /// [`End`] takes no arguments.
+    ///
+    /// If yielded, the [`scheduler`](crate::scheduler::Scheduler) will be terminated.
+    ///
+    /// # Be careful
+    ///
+    /// It means, that [`uninit`](crate::run::uninit) will be called.
+    /// After this [`Selector`](crate::io::selector::Selector) will be dropped and all poll states will be leaked (with memory).
+    ///
+    /// # Do not call this function in a production!
+    /// Because it may cause a memory leak and coroutine leak (which can lead to deadlocks). It is only intended for testing and should only be used for testing purposes.
     End,
 
     /// [`Sleep`] takes the duration.
@@ -151,52 +161,52 @@ pub enum YieldStatus {
 }
 
 impl YieldStatus {
-    /// Create a YieldStatus variant representing yielding control back to the scheduler.
+    /// Create a YieldStatus variant [`Yield`](YieldStatus::Yield).
     pub fn yield_now() -> Self {
         YieldStatus::Yield
     }
 
-    // TODO docs
+    /// Create a YieldStatus variant [`End`](YieldStatus::End).
     pub fn end() -> Self {
         YieldStatus::End
     }
 
-    /// Create a YieldStatus variant representing sleeping for a specified duration.
+    /// Create a YieldStatus variant [`Sleep`](YieldStatus::Sleep).
     pub fn sleep(duration: Duration) -> Self {
         YieldStatus::Sleep(duration)
     }
 
-    /// Create a YieldStatus variant [`NewTcpListener`].
+    /// Create a YieldStatus variant [`NewTcpListener`](YieldStatus::NewTcpListener).
     pub fn new_tcp_listener(address: SocketAddr, listener_ptr: *mut TcpListener) -> Self {
         YieldStatus::NewTcpListener(NewTcpListener { address, listener_ptr })
     }
 
-    /// Create a YieldStatus variant [`TcpConnect`].
+    /// Create a YieldStatus variant [`TcpConnect`](YieldStatus::TcpConnect).
     pub fn tcp_connect(address: SocketAddr, result_ptr: *mut Result<TcpStream, std::io::Error>) -> Self {
         YieldStatus::TcpConnect(TcpConnect { address, stream_ptr: result_ptr })
     }
 
-    /// Create a YieldStatus variant [`TcpAccept`].
+    /// Create a YieldStatus variant [`TcpAccept`](YieldStatus::TcpAccept).
     pub fn tcp_accept(is_registered: bool, state_ref: Ptr<PollState>, result_ptr: *mut Result<TcpStream, std::io::Error>) -> Self {
         YieldStatus::TcpAccept(TcpAccept { is_registered, state_ref, result_ptr })
     }
 
-    /// Create a YieldStatus variant [`TcpRead`].
+    /// Create a YieldStatus variant [`TcpRead`](YieldStatus::TcpRead).
     pub fn tcp_read(is_registered: bool, state_ref: Ptr<PollState>, result_ptr: *mut Result<&'static [u8], std::io::Error>) -> Self {
         YieldStatus::TcpRead(TcpRead { is_registered, state_ref, result_ptr })
     }
 
-    /// Create a YieldStatus variant [`TcpWrite`].
+    /// Create a YieldStatus variant [`TcpWrite`](YieldStatus::TcpWrite).
     pub fn tcp_write(state_ref: Ptr<PollState>, buffer: Buffer, result_ptr: *mut Result<Option<Buffer>, std::io::Error>) -> Self {
         YieldStatus::TcpWrite(TcpWrite { state_ref, buffer, result_ptr })
     }
 
-    /// Create a YieldStatus variant [`TcpWriteAll`].
+    /// Create a YieldStatus variant [`TcpWriteAll`](YieldStatus::TcpWriteAll).
     pub fn tcp_write_all(state_ref: Ptr<PollState>, buffer: Buffer, result_ptr: *mut Result<(), std::io::Error>) -> Self {
         YieldStatus::TcpWriteAll(TcpWriteAll { state_ref, buffer, result_ptr })
     }
 
-    /// Create a YieldStatus variant [`TcpClose`].
+    /// Create a YieldStatus variant [`TcpClose`](YieldStatus::TcpClose).
     pub fn tcp_close(state_ref: Ptr<PollState>) -> Self {
         YieldStatus::TcpClose(TcpClose { state_ptr: state_ref })
     }

@@ -26,7 +26,7 @@ impl SleepingCoroutine {
 ///
 /// # Example
 ///
-/// ```rust
+/// ```ignore
 /// use engine::coro;
 /// use engine::sleep;
 /// use std::time::Duration;

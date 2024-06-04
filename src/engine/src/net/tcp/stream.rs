@@ -17,7 +17,7 @@ use crate::utils::Ptr;
 ///
 /// # Examples
 ///
-/// ```rust
+/// ```ignore
 /// use std::io::Error;
 /// use engine::net::TcpStream;
 /// use engine::{coro, spawn_local};

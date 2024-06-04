@@ -236,6 +236,6 @@ mod tests {
 
         let local = Local::new(MustDrop { counter: 5 });
 
-        unsafe { assert_eq!(local.get().counter, 5); }
+        assert_eq!(local.get().counter, 5);
     }
 }

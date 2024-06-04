@@ -183,7 +183,16 @@ impl<T: Debug> Debug for Ptr<T> {
 #[cfg(test)]
 mod tests {
     use super::Ptr;
-    use std::mem::ManuallyDrop;
+    struct MustDrop {
+        #[allow(dead_code)]
+        counter: u32
+    }
+
+    impl Drop for MustDrop {
+        fn drop(&mut self) {
+            panic!("dropped");
+        }
+    }
 
     #[test]
     fn test_new() {
@@ -191,6 +200,7 @@ mod tests {
         let ptr = Ptr::new(value);
         unsafe {
             assert_eq!(*ptr.as_ref(), value);
+            ptr.drop_in_place();
         }
     }
 
@@ -198,6 +208,10 @@ mod tests {
     fn test_null() {
         let ptr: Ptr<i32> = Ptr::null();
         assert!(ptr.is_null());
+
+        unsafe {
+            ptr.drop_in_place();
+        }
     }
 
     #[test]
@@ -207,6 +221,7 @@ mod tests {
         let raw_ptr = ptr.as_ptr();
         unsafe {
             assert_eq!(*raw_ptr, value);
+            ptr.drop_in_place();
         }
     }
 
@@ -217,17 +232,19 @@ mod tests {
         unsafe {
             let value_ref = ptr.as_ref();
             assert_eq!(*value_ref, value);
+            ptr.drop_in_place();
         }
     }
 
     #[test]
     fn test_as_mut() {
         let value = 40;
-        let mut ptr = Ptr::new(value);
+        let ptr = Ptr::new(value);
         unsafe {
             let value_mut = ptr.as_mut();
             *value_mut = 50;
             assert_eq!(*ptr.as_ref(), 50);
+            ptr.drop_in_place();
         }
     }
 
@@ -257,12 +274,14 @@ mod tests {
         let converted_ptr: Ptr<i32> = Ptr::from(raw_u64);
         unsafe {
             assert_eq!(*converted_ptr.as_ref(), value);
+            ptr.drop_in_place();
         }
     }
 
     #[test]
+    #[should_panic(expected = "dropped")]
     fn test_drop_in_place() {
-        let value = ManuallyDrop::new(String::from("test"));
+        let value = MustDrop { counter: 5 };
         let ptr = Ptr::new(value);
         unsafe {
             ptr.drop_in_place();
@@ -275,26 +294,28 @@ mod tests {
         let ptr = Ptr::new(value);
         unsafe {
             assert_eq!(ptr.read(), value);
+            ptr.drop_in_place();
         }
     }
 
     #[test]
     fn test_write() {
         let value = 80;
-        let mut ptr = Ptr::new(value);
+        let ptr = Ptr::new(value);
         unsafe {
             ptr.write(90);
             assert_eq!(*ptr.as_ref(), 90);
+            ptr.drop_in_place();
         }
     }
 
     #[test]
+    #[should_panic(expected = "dropped")]
     fn test_write_with_drop() {
-        let value = 100;
-        let mut ptr = Ptr::new(value);
+        let value = MustDrop { counter: 1 };
+        let ptr = Ptr::new(value);
         unsafe {
-            ptr.write_with_drop(110);
-            assert_eq!(*ptr.as_ref(), 110);
+            ptr.write_with_drop(MustDrop { counter: 2 });
         }
     }
 
@@ -305,6 +326,7 @@ mod tests {
         let cloned_ptr = ptr.clone();
         unsafe {
             assert_eq!(*cloned_ptr.as_ref(), value);
+            ptr.drop_in_place();
         }
     }
 
@@ -314,5 +336,9 @@ mod tests {
         let ptr = Ptr::new(value);
         let debug_str = format!("{:?}", ptr);
         assert_eq!(debug_str, "130");
+
+        unsafe {
+            ptr.drop_in_place();
+        }
     }
 }

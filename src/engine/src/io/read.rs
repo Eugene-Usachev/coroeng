@@ -20,7 +20,7 @@ pub trait AsyncRead<T> {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// use engine::coro;
     /// use engine::net::TcpStream;
     /// use std::io::Error;

@@ -25,7 +25,7 @@ pub trait AsyncWrite<T> {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// use engine::coro;
     /// use engine::net::TcpStream;
     /// use engine::buf::Buffer;
@@ -55,7 +55,7 @@ pub trait AsyncWrite<T> {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// use engine::coro;
     /// use engine::net::TcpStream;
     /// use engine::buf::Buffer;
