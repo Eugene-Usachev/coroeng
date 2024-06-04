@@ -148,7 +148,7 @@ impl TcpListener {
 fn close_listener(state_ptr: Ptr<PollState>) -> CoroutineImpl {
     Box::pin(#[coroutine] static move || {
         yield TcpListener::close(state_ptr);
-        unsafe { state_ptr.drop_in_place(); }
+        unsafe { state_ptr.deallocate(); }
     })
 }
 
@@ -158,7 +158,7 @@ impl Drop for TcpListener {
         if self.is_registered {
             local_scheduler().sched(close_listener(state_ptr));
         } else {
-            unsafe { state_ptr.drop_in_place(); }
+            unsafe { state_ptr.deallocate(); }
         }
     }
 }

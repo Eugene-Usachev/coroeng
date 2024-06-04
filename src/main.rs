@@ -32,7 +32,7 @@
 use std::{ptr, thread};
 use std::collections::VecDeque;
 use std::intrinsics::unlikely;
-use std::io::Error;
+use std::io::{Error};
 use std::net::ToSocketAddrs;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::SeqCst;
@@ -224,10 +224,11 @@ fn benchmark_sleep() {
 }
 
 fn main() {
-    docs();
+    //docs();
     //io_uring();
     //tcp_benchmark();
     //run_on_core(ping_pong, get_core_ids().unwrap()[0]);
+    //std1();
 }
 
 // TODO r
@@ -335,7 +336,7 @@ fn io_uring() -> Result<(), Error> {
                 let token = Ptr::from(token_index);
 
                 if ret < 0 {
-                    unsafe { token.drop_in_place() };
+                    //unsafe { token.drop_in_place() };
                     eprintln!(
                         "token {:?} error: {:?}",
                         token,
@@ -378,8 +379,7 @@ fn io_uring() -> Result<(), Error> {
 
                     Token::Read { fd, mut buf } => {
                         if unlikely(ret == 0) {
-                            println!("fd: {} closed", fd);
-                            unsafe {token.drop_in_place()};
+                            //unsafe {token.drop_in_place()};
                             unsafe {
                                 libc::close(fd);
                             }
@@ -468,4 +468,24 @@ fn io_uring() -> Result<(), Error> {
     run(core)?;
 
     Ok(())
+}
+
+// TODO r
+fn std1() {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("engine:8081").unwrap();
+
+    for stream in listener.incoming() {
+        let mut stream = stream.unwrap();
+        thread::spawn(move || {
+            let mut buf = [0;4096];
+            loop {
+               let n = stream.read(&mut buf).unwrap();
+               if n == 0 {
+                   break;
+               }
+               stream.write(&buf[0..n]).unwrap();
+            }
+        });
+    }
 }

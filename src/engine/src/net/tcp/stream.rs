@@ -107,6 +107,7 @@ impl AsyncRead<&'static [u8]> for TcpStream {
     #[inline(always)]
     fn read(&mut self, res: *mut Result<&'static [u8], Error>) -> YieldStatus {
         let is_registered = self.is_registered();
+        // TODO think about it
         if !is_registered {
             self.set_registered(true);
         }
@@ -129,7 +130,7 @@ impl AsyncWrite<Buffer> for TcpStream {
 fn close_stream(state_ref: Ptr<PollState>) -> CoroutineImpl {
     Box::pin(#[coroutine] static move || {
         yield TcpStream::close(state_ref);
-        unsafe { state_ref.drop_in_place(); }
+        unsafe { state_ref.deallocate(); }
     })
 }
 
@@ -139,7 +140,7 @@ impl Drop for TcpStream {
         if self.is_registered() {
             local_scheduler().sched(close_stream(state_ptr));
         } else {
-            unsafe { state_ptr.drop_in_place(); }
+            unsafe { state_ptr.deallocate(); }
         }
     }
 }

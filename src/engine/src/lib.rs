@@ -18,6 +18,7 @@ pub mod cfg;
 pub mod run;
 pub mod buf;
 pub mod scheduler;
+pub mod fs;
 //pub mod work_stealing;
 
 pub use scheduler::local_scheduler;

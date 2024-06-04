@@ -80,8 +80,20 @@ impl<T> Ptr<T> {
 
         unsafe {
             if std::mem::needs_drop::<T>() {
-                drop(self.read());
+               drop(self.read());
             }
+            dealloc(self.ptr as *mut u8, Layout::new::<T>());
+        }
+    }
+
+    /// Drop the value without calling a destructor.
+    #[inline(always)]
+    pub unsafe fn deallocate(self) {
+        if self.ptr.is_null() {
+            return;
+        }
+
+        unsafe {
             dealloc(self.ptr as *mut u8, Layout::new::<T>());
         }
     }
