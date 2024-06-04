@@ -36,7 +36,11 @@ pub trait Selector {
     /// It will poll the [`Selector`] (this step can take a millisecond) and wake the coroutines up.
     ///
     /// So, you should call this method, when no ready coroutines.
-    fn poll(&mut self, scheduler: &mut Scheduler) -> Result<(), ()>;
+    ///
+    /// # Return
+    ///
+    /// Returns true, if [`end`](crate::coroutine::YieldStatus::End) was handled.
+    fn poll(&mut self, scheduler: &mut Scheduler) -> Result<bool, ()>;
     /// Registers the [`PollState`] with the selector.
     fn register(&mut self, state_ptr: Ptr<PollState>);
     /// Deregisters the [`PollState`] with the selector by the fd.

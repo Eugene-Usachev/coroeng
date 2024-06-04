@@ -9,7 +9,7 @@ use std::time::Instant;
 use proc::coro;
 use crate::cfg::{config_selector, SelectorType};
 use crate::coroutine::coroutine::{CoroutineImpl};
-use crate::coroutine::{yield_now, YieldStatus};
+use crate::coroutine::{end, yield_now, YieldStatus};
 use crate::io::sys::unix::{EpolledSelector, IoUringSelector};
 use crate::io::{Selector, PollState};
 use crate::net::{TcpListener};
@@ -33,6 +33,12 @@ thread_local! {
 /// - stores sleeping coroutines and monitors the time until they need to be woken;
 ///
 /// - creates [`Selector`] and works with it.
+///
+/// # Why LIFO?
+///
+/// The FIFO approach ensures fairness. However, our goal is not to achieve fairness, but to maximize performance.
+/// The LIFO approach is more efficient because it allows us to take advantage of data from previous tasks.
+/// This is because the data is already stored in the processor cache (by the parent coroutine), so we can use it more effectively.
 pub struct Scheduler {
     task_queue: VecDeque<CoroutineImpl>,
     sleeping: BTreeSet<SleepingCoroutine>,
@@ -70,17 +76,38 @@ impl Scheduler {
     }
 
     /// Stores the [`coroutine`](CoroutineImpl) in the [`Scheduler`] to wake it up later.
+    /// Use [`spawn_local`](crate::spawn_local) instead if you don't want to low-level work.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use std::ptr::null_mut;
+    /// use engine::{coro, local_scheduler};
+    ///
+    /// #[coro]
+    /// fn say_hello(from: &str) {
+    ///     println!("hello, world from {:?} !", from)
+    /// }
+    ///
+    /// local_scheduler().sched(say_hello("sched method", null_mut()));
+    /// ```
     pub fn sched(&mut self, func: CoroutineImpl) {
         self.task_queue.push_back(func);
     }
 
     /// Wakes up the sleeping coroutines, which are ready to run.
-    pub(crate) fn awake_coroutines(&mut self) {
+    ///
+    /// # Return
+    ///
+    /// Returns true if [`end`](YieldStatus::End) was handled.
+    pub(crate) fn awake_coroutines<S: Selector>(&mut self, selector: &mut S) -> bool {
         let now = Instant::now();
         loop {
             if let Some(sleeping_coroutine) = self.sleeping.pop_first() {
                 if now >= sleeping_coroutine.execution_time {
-                    self.sched(sleeping_coroutine.co);
+                    if unlikely(self.handle_coroutine_state(selector, sleeping_coroutine.co)) {
+                        return true;
+                    }
                 } else {
                     self.sleeping.insert(sleeping_coroutine);
                     break;
@@ -89,9 +116,15 @@ impl Scheduler {
                 break;
             }
         }
+
+        false
     }
 
     /// Resume the provided [`coroutine`](CoroutineImpl) and process the result.
+    ///
+    /// # Return
+    ///
+    /// Returns true if [`end`](YieldStatus::End) was handled.
     #[inline(always)]
     pub(crate) fn handle_coroutine_state<S: Selector>(&mut self, selector: &mut S, mut task: CoroutineImpl) -> bool {
         let res: CoroutineState<YieldStatus, ()> = task.as_mut().resume(());
@@ -104,7 +137,7 @@ impl Scheduler {
                     }
 
                     YieldStatus::Yield => {
-                        self.task_queue.push_back(task);
+                        self.task_queue.push_front(task);
                     }
 
                     YieldStatus::End => {
@@ -208,8 +241,14 @@ impl Scheduler {
         let scheduler = local_scheduler();
         loop {
             //scheduler.process_ready_coroutines(selector_ref);
-            scheduler.awake_coroutines();
-            selector_ref.poll(scheduler).expect("Poll error");
+            if unlikely(scheduler.awake_coroutines(selector_ref)) {
+                yield end();
+            }
+
+            if unlikely(selector_ref.poll(scheduler).expect("Poll error")) {
+                yield end();
+            }
+
             yield yield_now();
         }
     }
@@ -225,7 +264,7 @@ impl Scheduler {
         let mut task;
 
         loop {
-            task_ = self.task_queue.pop_front();
+            task_ = self.task_queue.pop_back();
 
             task = unsafe { task_.unwrap_unchecked() };
             if unlikely(self.handle_coroutine_state(&mut selector, task)) {
@@ -242,4 +281,51 @@ pub fn local_scheduler() -> &'static mut Scheduler {
     LOCAL_SCHEDULER.with(|local| {
         unsafe { (&mut *local.get()).assume_init_mut() }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+    use super::*;
+    use crate::{test_local, coro, sleep::sleep};
+    use crate::local::Local;
+
+    #[test_local(crate="crate")]
+    fn test_sched() {
+        #[coro(crate="crate")]
+        fn insert(number: u16, arr: Local<Vec<u16>>) {
+            arr.get_mut().push(number);
+        }
+
+        let scheduler = local_scheduler();
+        let arr = Local::new(Vec::new());
+
+        arr.get_mut().push(10);
+        // 30 because LIFO
+        scheduler.sched(insert(30, arr.clone(), null_mut()));
+        scheduler.sched(insert(20, arr.clone(), null_mut()));
+
+        yield yield_now();
+
+        assert_eq!(&vec![10, 20, 30], arr.get());
+    }
+
+    #[test_local(crate="crate")]
+    fn test_sleep() {
+        #[coro(crate="crate")]
+        fn sleep_for(dur: Duration, number: u16, arr: Local<Vec<u16>>) {
+            yield sleep(dur);
+            arr.get_mut().push(number);
+        }
+
+        let scheduler = local_scheduler();
+        let arr = Local::new(Vec::new());
+        scheduler.sched(sleep_for(Duration::from_millis(1), 1, arr.clone(), null_mut()));
+        scheduler.sched(sleep_for(Duration::from_millis(4), 4, arr.clone(), null_mut()));
+        scheduler.sched(sleep_for(Duration::from_millis(3), 3, arr.clone(), null_mut()));
+        scheduler.sched(sleep_for(Duration::from_millis(2), 2, arr.clone(), null_mut()));
+
+        yield sleep(Duration::from_millis(5));
+        assert_eq!(&vec![1, 2, 3, 4], arr.get());
+    }
 }

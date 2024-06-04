@@ -42,28 +42,28 @@ impl EpolledSelector {
     }
 
     #[inline(always)]
-    fn handle_state(&mut self, state_ptr: Ptr<PollState>, scheduler: &mut Scheduler) {
+    #[must_use]
+    fn handle_state(&mut self, state_ptr: Ptr<PollState>, scheduler: &mut Scheduler) -> bool {
         let state = unsafe { state_ptr.read() };
         match state {
-            PollState::Empty(_) => {}
+            PollState::Empty(_) => { false }
 
             PollState::AcceptTcp(state) => {
                 let res = accept4(state.fd, SockFlag::SOCK_CLOEXEC);
                 if res.is_err() {
                     let err = res.unwrap_err();
                     if err == Errno::EAGAIN || err == Errno::EWOULDBLOCK {
-                        return;
+                        return false;
                     }
                     write_err!(state.result, Error::from(err));
-                    scheduler.handle_coroutine_state(self, state.coroutine);
-                    return;
+                    return scheduler.handle_coroutine_state(self, state.coroutine);
                 }
 
                 let incoming_fd = res.unwrap();
                 unsafe { setup_connection(&BorrowedFd::borrow_raw(incoming_fd)); }
                 write_ok!(state.result, TcpStream::new(incoming_fd));
 
-                scheduler.handle_coroutine_state(self, state.coroutine);
+                scheduler.handle_coroutine_state(self, state.coroutine)
             }
 
             PollState::ConnectTcp(_state) => {
@@ -74,14 +74,13 @@ impl EpolledSelector {
                 let res = recvfrom::<()>(state.fd, &mut self.req_buf);
                 if res.is_err() {
                     write_err!(state.result, Error::from(res.unwrap_err_unchecked()));
-                    scheduler.handle_coroutine_state(self, state.coroutine);
-                    return;
+                    return scheduler.handle_coroutine_state(self, state.coroutine)
                 }
 
                 let (n, _) = res.unwrap();
                 write_ok!(state.result, mem::transmute(&self.req_buf[..n]));
 
-                scheduler.handle_coroutine_state(self, state.coroutine);
+                scheduler.handle_coroutine_state(self, state.coroutine)
             }
 
             PollState::ReadTcp(_) => {
@@ -104,7 +103,7 @@ impl EpolledSelector {
                     write_err!(state.result, Error::from(res.unwrap_err_unchecked()));
                 }
 
-                scheduler.handle_coroutine_state(self, state.coroutine);
+                scheduler.handle_coroutine_state(self, state.coroutine)
             }
 
             PollState::WriteAllTcp(mut state) => {
@@ -115,7 +114,7 @@ impl EpolledSelector {
                     if unlikely(res.is_err()) {
                         write_err!(state.result, Error::from(res.unwrap_err_unchecked()));
                         scheduler.handle_coroutine_state(self, state.coroutine);
-                        return;
+                        return false;
                     }
 
                     state.buffer.set_offset(state.buffer.offset() + unsafe { res.unwrap_unchecked() });
@@ -125,14 +124,14 @@ impl EpolledSelector {
                 }
                 write_ok!(state.result, ());
 
-                scheduler.handle_coroutine_state(self, state.coroutine);
+                scheduler.handle_coroutine_state(self, state.coroutine)
             }
 
             PollState::CloseTcp(state) => {
                 let fd = state.fd;
                 let _ = self.deregister(state.fd);
                 unsafe { net::close_connection(&BorrowedFd::borrow_raw(fd)); }
-                scheduler.handle_coroutine_state(self, state.coroutine);
+                scheduler.handle_coroutine_state(self, state.coroutine)
             }
         }
     }
@@ -145,24 +144,28 @@ impl Selector for EpolledSelector {
     }
 
     #[inline(always)]
-    fn poll(&mut self, scheduler: &mut Scheduler) -> Result<(), ()> {
+    fn poll(&mut self, scheduler: &mut Scheduler) -> Result<bool, ()> {
         // TODO maybe drain is faster?
         for i in 0..self.unhandled_states.len() {
             let state_ptr = self.unhandled_states[i];
-            self.handle_state(state_ptr, scheduler);
+            if unlikely(self.handle_state(state_ptr, scheduler)) {
+                return Ok(true);
+            }
         }
         self.unhandled_states.clear();
 
         let num_incoming_events = self.epoll.wait(&mut self.events, EpollTimeout::try_from(1).unwrap()).expect("failed to wait");
         if num_incoming_events == 0 {
-            return Ok(());
+            return Ok(false);
         }
 
         for i in 0..num_incoming_events {
             let event = &self.events[i];
-            self.handle_state(Ptr::from(event.data()), scheduler);
+            if unlikely(self.handle_state(Ptr::from(event.data()), scheduler)) {
+                return Ok(true);
+            }
         }
-        Ok(())
+        Ok(false)
     }
 
     #[inline(always)]

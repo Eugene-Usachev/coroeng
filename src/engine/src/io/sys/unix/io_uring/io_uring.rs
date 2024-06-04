@@ -3,6 +3,7 @@ use std::cell::UnsafeCell;
 use std::io::Error;
 use std::os::fd::{AsRawFd, IntoRawFd, RawFd};
 use std::{mem, ptr};
+use std::intrinsics::unlikely;
 use io_uring::{cqueue, IoUring, opcode, squeue, types};
 use io_uring::types::{SubmitArgs, Timespec};
 use crate::buf::buffer;
@@ -17,8 +18,7 @@ macro_rules! handle_ret {
         if $ret < 0 {
             let err = Error::last_os_error();
             unsafe { $state.result.write(Err(err)); }
-            $scheduler.handle_coroutine_state($selector, $state.coroutine);
-            return;
+            return $scheduler.handle_coroutine_state($selector, $state.coroutine);
         }
     };
 }
@@ -26,8 +26,7 @@ macro_rules! handle_ret {
 macro_rules! handle_ret_without_result {
     ($ret: expr, $state: expr, $scheduler: expr, $selector: expr) => {
         if $ret < 0 {
-            $scheduler.handle_coroutine_state($selector, $state.coroutine);
-            return;
+            return $scheduler.handle_coroutine_state($selector, $state.coroutine);
         }
     };
 }
@@ -108,7 +107,8 @@ impl IoUringSelector {
     }
 
     #[inline(always)]
-    fn handle_completion(&mut self, scheduler: &mut Scheduler, ret: i32, ptr: Ptr<PollState>) {
+    #[must_use]
+    fn handle_completion(&mut self, scheduler: &mut Scheduler, ret: i32, ptr: Ptr<PollState>) -> bool {
         let state = unsafe { ptr.read() };
 
         match state {
@@ -121,15 +121,16 @@ impl IoUringSelector {
                 let accepted_fd = ret;
                 write_ok!(state.result, TcpStream::new(accepted_fd));
 
-                scheduler.handle_coroutine_state(self, state.coroutine);
+                scheduler.handle_coroutine_state(self, state.coroutine)
             }
             PollState::ConnectTcp(state) => {
                 handle_ret!(ret, state, scheduler, self);
 
                 write_ok!(state.result, TcpStream::new(state.socket.into_raw_fd()));
 
-                scheduler.handle_coroutine_state(self, state.coroutine);
+                let res = scheduler.handle_coroutine_state(self, state.coroutine);
                 unsafe { ptr.drop_in_place() };
+                res
             }
             PollState::PollTcp(state) => {
                 handle_ret!(ret, state, scheduler, self);
@@ -137,6 +138,7 @@ impl IoUringSelector {
                 unsafe { ptr.write(PollState::new_read_tcp(state.fd, buffer(), state.coroutine, state.result)) };
 
                 self.register(ptr);
+                false
             }
             PollState::ReadTcp(state) => {
                 handle_ret!(ret, state, scheduler, self);
@@ -144,7 +146,7 @@ impl IoUringSelector {
                 let slice = unsafe { mem::transmute(&state.buffer.slice[..ret as usize]) };
                 write_ok!(state.result, slice);
 
-                scheduler.handle_coroutine_state(self, state.coroutine);
+                scheduler.handle_coroutine_state(self, state.coroutine)
             }
             PollState::WriteTcp(mut state) => {
                 handle_ret!(ret, state, scheduler, self);
@@ -156,25 +158,26 @@ impl IoUringSelector {
                     write_ok!(state.result, Some(state.buffer));
                 }
 
-                scheduler.handle_coroutine_state(self, state.coroutine);
+                scheduler.handle_coroutine_state(self, state.coroutine)
             }
             PollState::WriteAllTcp(mut state) => {
                 handle_ret!(ret, state, scheduler, self);
 
                 if ret as usize == state.buffer.len() {
                     write_ok!(state.result, ());
-                    scheduler.handle_coroutine_state(self, state.coroutine);
+                    scheduler.handle_coroutine_state(self, state.coroutine)
                 } else {
                     state.buffer.set_offset(state.buffer.offset() + ret as usize);
                     unsafe { ptr.write(PollState::new_write_all_tcp(state.fd, state.buffer, state.coroutine, state.result)) };
 
                     self.register(ptr);
+                    false
                 }
             }
             PollState::CloseTcp(state) => {
                 handle_ret_without_result!(ret, state, scheduler, self);
 
-                scheduler.handle_coroutine_state(self, state.coroutine);
+                scheduler.handle_coroutine_state(self, state.coroutine)
             }
         }
     }
@@ -189,7 +192,7 @@ impl Selector for IoUringSelector {
     fn deregister(&mut self, _fd: RawFd) {}
 
     #[inline(always)]
-    fn poll(&mut self, scheduler: &mut Scheduler) -> Result<(), ()> {
+    fn poll(&mut self, scheduler: &mut Scheduler) -> Result<bool, ()> {
         if self.submit().is_err() {
             return Err(())
         }
@@ -201,10 +204,12 @@ impl Selector for IoUringSelector {
         for cqe in &mut cq {
             let ret = cqe.result();
             let token = Ptr::from(cqe.user_data());
-            self.handle_completion(scheduler, ret, token);
+            if unlikely(self.handle_completion(scheduler, ret, token)) {
+                return Ok(true);
+            }
         }
 
-        Ok(())
+        Ok(false)
     }
 
     #[inline(always)]
