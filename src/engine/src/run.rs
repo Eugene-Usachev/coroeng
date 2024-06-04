@@ -1,3 +1,4 @@
+//! This module provides functions that run the [`Scheduler`] and [`uninit`] function.
 use std::ptr::null_mut;
 use crate::{cfg, local_scheduler};
 use crate::buf::BufPool;
