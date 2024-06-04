@@ -16,6 +16,11 @@ use crate::coroutine::YieldStatus;
 ///     // work here after some time
 /// }
 /// ```
-pub fn yield_now() -> YieldStatus {
+pub fn yield_now(_res: *mut ()) -> YieldStatus {
     YieldStatus::yield_now()
+}
+
+// TODO docs
+pub fn end(_res: *mut ()) -> YieldStatus {
+    YieldStatus::end()
 }

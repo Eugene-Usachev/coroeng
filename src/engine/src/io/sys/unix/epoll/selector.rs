@@ -125,7 +125,7 @@ impl EpolledSelector {
                 }
                 write_ok!(state.result, ());
 
-                scheduler.handle_coroutine_state(self, state.coroutine)
+                scheduler.handle_coroutine_state(self, state.coroutine);
             }
 
             PollState::CloseTcp(state) => {

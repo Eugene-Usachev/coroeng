@@ -1,11 +1,11 @@
 use std::io::Error;
 use std::fmt::{Debug, Formatter};
-use std::io;
-use std::os::fd::{RawFd};
+import_fd_for_os!();
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use crate::coroutine::coroutine::CoroutineImpl;
 use crate::net::tcp::TcpStream;
 use crate::buf::Buffer;
+use crate::import_fd_for_os;
 
 pub struct EmptyState {
     fd: RawFd
@@ -145,8 +145,8 @@ impl PollState {
 impl Debug for PollState {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            PollState::Empty(state) => { write!(f, "Empty, fd: {}", state.fd) }
-            PollState::AcceptTcp(state) => { write!(f, "AcceptTcp, fd: {}", state.fd) }
+            PollState::Empty(state) => { write!(f, "Empty, fd: {:?}", state.fd) }
+            PollState::AcceptTcp(state) => { write!(f, "AcceptTcp, fd: {:?}", state.fd) }
             PollState::ConnectTcp(state) => {
                 write!(
                     f,
@@ -154,11 +154,11 @@ impl Debug for PollState {
                     state.address
                 )
             }
-            PollState::PollTcp(state) => { write!(f, "PollTcp, fd: {}", state.fd) }
-            PollState::ReadTcp(state) => { write!(f, "ReadTcp, fd: {}", state.fd) }
-            PollState::WriteTcp(state) => { write!(f, "WriteTcp, fd: {}", state.fd) }
-            PollState::WriteAllTcp(state) => { write!(f, "WriteAllTcp, fd: {}", state.fd) }
-            PollState::CloseTcp(state) => { write!(f, "CloseTcp, fd: {}", state.fd) }
+            PollState::PollTcp(state) => { write!(f, "PollTcp, fd: {:?}", state.fd) }
+            PollState::ReadTcp(state) => { write!(f, "ReadTcp, fd: {:?}", state.fd) }
+            PollState::WriteTcp(state) => { write!(f, "WriteTcp, fd: {:?}", state.fd) }
+            PollState::WriteAllTcp(state) => { write!(f, "WriteAllTcp, fd: {:?}", state.fd) }
+            PollState::CloseTcp(state) => { write!(f, "CloseTcp, fd: {:?}", state.fd) }
         }
     }
 }

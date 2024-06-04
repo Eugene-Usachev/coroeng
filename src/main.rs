@@ -28,13 +28,11 @@
 #![feature(gen_blocks)]
 #![feature(core_intrinsics)]
 
-use std::{io, ptr, thread};
+use std::{ptr, thread};
 use std::collections::VecDeque;
 use std::intrinsics::unlikely;
 use std::io::Error;
 use std::net::ToSocketAddrs;
-use std::os::unix::net::SocketAddr;
-use std::ptr::null_mut;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::SeqCst;
 use std::time::Duration;
@@ -42,8 +40,8 @@ use io_uring::types::{SubmitArgs, Timespec};
 use engine::{coro, run_on_all_cores, run_on_core, spawn_local, wait};
 use engine::net::{TcpListener, TcpStream};
 use engine::sleep::sleep;
-use engine::buf::{buf_pool, Buffer, buffer, BufPool};
-use engine::io::PollState;
+use engine::buf::{Buffer, buffer, BufPool};
+use engine::io::{AsyncRead, AsyncWrite};
 use engine::utils::{CoreId, get_core_ids, Ptr, set_for_current};
 
 fn docs() {

@@ -91,6 +91,9 @@ pub enum YieldStatus {
     /// The current coroutine will be woken up by the scheduler after all other coroutines.
     Yield,
 
+    // TODO docs
+    End,
+
     /// [`Sleep`] takes the duration.
     ///
     /// # Arguments
@@ -151,6 +154,11 @@ impl YieldStatus {
     /// Create a YieldStatus variant representing yielding control back to the scheduler.
     pub fn yield_now() -> Self {
         YieldStatus::Yield
+    }
+
+    // TODO docs
+    pub fn end() -> Self {
+        YieldStatus::End
     }
 
     /// Create a YieldStatus variant representing sleeping for a specified duration.

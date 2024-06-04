@@ -1,18 +1,17 @@
 use std::cell::{UnsafeCell};
 use std::collections::{BTreeSet, VecDeque};
+use std::intrinsics::unlikely;
 use std::mem::{MaybeUninit, transmute};
 #[allow(unused_imports)] // compiler will complain if it's not used, but we need it for resume()
 use std::ops::{Coroutine, CoroutineState};
 use std::time::Instant;
-use nix::sys::socket::socket;
 use crate::cfg::{config_selector, SelectorType};
 use crate::coroutine::coroutine::{CoroutineImpl};
 use crate::coroutine::YieldStatus;
 use crate::io::sys::unix::{EpolledSelector, IoUringSelector};
-use crate::io::{Selector, PollState, BlockingState};
+use crate::io::{Selector, PollState};
 use crate::net::{TcpListener};
 use crate::{new_coroutine, write_err};
-use crate::scheduler::blocking_pool::BlockingPool;
 use crate::sleep::SleepingCoroutine;
 use crate::utils::Ptr;
 
@@ -68,7 +67,7 @@ impl Scheduler {
     }
 
     #[inline(always)]
-    pub(crate) fn handle_coroutine_state<S: Selector>(&mut self, selector: &mut S, mut task: CoroutineImpl) {
+    pub(crate) fn handle_coroutine_state<S: Selector>(&mut self, selector: &mut S, mut task: CoroutineImpl) -> bool {
         let res: CoroutineState<YieldStatus, ()> = task.as_mut().resume(());
         match res {
             CoroutineState::Yielded(status) => {
@@ -80,6 +79,10 @@ impl Scheduler {
 
                     YieldStatus::Yield => {
                         self.task_queue.push_back(task);
+                    }
+
+                    YieldStatus::End => {
+                        return true;
                     }
 
                     YieldStatus::NewTcpListener(status) => {
@@ -95,7 +98,7 @@ impl Scheduler {
                             let (error, task) = unsafe { state_.unwrap_err_unchecked() };
                             write_err!(status.stream_ptr, error);
                             self.handle_coroutine_state(selector, task);
-                            return;
+                            return false;
                         }
 
                         selector.register(unsafe {Ptr::new(state_.unwrap_unchecked())});
@@ -145,6 +148,8 @@ impl Scheduler {
             }
             CoroutineState::Complete(_) => {}
         }
+
+        false
     }
 
     // #[inline(always)]
@@ -187,7 +192,9 @@ impl Scheduler {
             task_ = self.task_queue.pop_front();
 
             task = unsafe { task_.unwrap_unchecked() };
-            self.handle_coroutine_state(&mut selector, task);
+            if unlikely(self.handle_coroutine_state(&mut selector, task)) {
+                break;
+            }
         }
     }
 }

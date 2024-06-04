@@ -1,5 +1,4 @@
 use std::io::Error;
-use crate::buf::Buffer;
 use crate::coroutine::YieldStatus;
 
 /// The AsyncWrite trait provides asynchronous write functionality for various types of data.

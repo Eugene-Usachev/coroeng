@@ -24,4 +24,4 @@ pub use scheduler::local_scheduler;
 #[allow(unused_imports)]
 pub use macros::*;
 pub use run::*;
-pub use proc::*;
+pub use proc::{test_local, coro, wait, spawn_local};

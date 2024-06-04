@@ -5,13 +5,12 @@ use std::os::fd::{AsRawFd, IntoRawFd, RawFd};
 use std::{mem, ptr};
 use io_uring::{cqueue, IoUring, opcode, squeue, types};
 use io_uring::types::{SubmitArgs, Timespec};
-use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use crate::buf::buffer;
 use crate::io::{Selector, PollState};
 use crate::net::TcpStream;
 use crate::scheduler::Scheduler;
 use crate::utils::{Ptr};
-use crate::{write_err, write_ok};
+use crate::{write_ok};
 
 macro_rules! handle_ret {
     ($ret: expr, $state: expr, $scheduler: expr, $selector: expr) => {

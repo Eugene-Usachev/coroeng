@@ -2,11 +2,35 @@
 #![feature(coroutine_trait)]
 #![feature(stmt_expr_attributes)]
 extern crate proc_macro;
-use proc_macro::TokenStream;
-use std::ops::DerefMut;
-use quote::{quote};
-use syn::{parse_macro_input, ItemFn, ReturnType, Expr, Stmt, Block};
+use proc_macro::{TokenStream};
+use std::ops::{Deref, DerefMut};
+use quote::{quote, ToTokens};
+use syn::{parse_macro_input, ItemFn, ReturnType, Expr, Stmt, Block, Lit};
 use syn::token::Semi;
+
+fn get_crate_name(attr: TokenStream) -> proc_macro2::TokenStream {
+    let mut engine = quote! { engine };
+    match syn::parse::<syn::ExprAssign>(attr) {
+        Ok(syntax_tree) => {
+            if syntax_tree.left.into_token_stream().to_string() == "crate" {
+                match syntax_tree.right.deref() {
+                    Expr::Lit(lit) => {
+                        if let Lit::Str(expr) = lit.lit.clone() {
+                            let token_stream: proc_macro2::TokenStream = expr.value().parse().unwrap();
+                            engine = token_stream;
+                        }
+                    }
+
+                    _ => {}
+                }
+            }
+        },
+        Err(_err) => {},
+    }
+
+
+    engine
+}
 
 /// Transforms function body. Replaces all `yield` expressions to
 /// ```ignore
@@ -112,8 +136,8 @@ fn transform_function_yield(block: &mut Block) {
             }
             Expr::Call(call_ex) => {
                 for arg in &mut call_ex.args {
-                transform_expr(arg, None);
-            }
+                    transform_expr(arg, None);
+                }
             }
             Expr::Array(array_ex) => {
                 for mut elem in &mut array_ex.elems {
@@ -399,7 +423,8 @@ fn transform_function_return(block: &mut Block, level: usize) {
 /// In my tests, it works well with literals, matches, if statements, calls methods and functions, blocks of code and unsafe blocks.
 /// But you always can try, in the worst case it just will not compile.
 #[proc_macro_attribute]
-pub fn coro(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn coro(macro_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let crate_name = get_crate_name(macro_attr);
     let mut input = parse_macro_input!(item as ItemFn);
 
     let fn_name = &input.sig.ident;
@@ -452,7 +477,7 @@ pub fn coro(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     expanded = quote! {
         #expanded
-        #fn_vis fn #fn_name #fn_generics (#fn_args) #fn_where_clause -> engine::coroutine::CoroutineImpl {
+        #fn_vis fn #fn_name #fn_generics (#fn_args) #fn_where_clause -> #crate_name::coroutine::CoroutineImpl {
             std::boxed::Box::pin(#[coroutine] static move || {
             #fn_block
             })
@@ -576,4 +601,45 @@ pub fn spawn_local(input: TokenStream) -> TokenStream {
     };
 
     TokenStream::from(block)
+}
+
+#[proc_macro_attribute]
+pub fn test_local(macro_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let crate_name = get_crate_name(macro_attr);
+    let crate_name_str = crate_name.to_string();
+
+    let mut input = parse_macro_input!(item as ItemFn);
+    let fn_name = &input.sig.ident;
+    let fn_args = &input.sig.inputs;
+    let fn_vis = &input.vis;
+    let fn_generics = &input.sig.generics;
+    let fn_where_clause = &input.sig.generics.where_clause;
+    let fn_block = &mut input.block;
+    let attr = &input.attrs;
+
+    let mut expanded = quote! {
+        #[test]
+    };
+    for attr in attr {
+        expanded = quote! {
+            #expanded
+            #attr
+        };
+    }
+
+    expanded = quote! {
+        #expanded
+        #fn_vis fn #fn_name #fn_generics (#fn_args) #fn_where_clause {
+            #[#crate_name::coro(crate=#crate_name_str)]
+            fn coroutine_creator_for_this_test_DO_NOT_CALL_YOUR_FUNCTIONS_AS_IT() {
+                #fn_block
+                yield #crate_name::coroutine::end();
+            }
+
+            let core_id = #crate_name::utils::get_core_ids().unwrap()[0];
+            #crate_name::run_on_core(coroutine_creator_for_this_test_DO_NOT_CALL_YOUR_FUNCTIONS_AS_IT, core_id);
+        }
+    };
+
+    TokenStream::from(expanded)
 }

@@ -79,6 +79,9 @@ impl<T> Ptr<T> {
         }
 
         unsafe {
+            if std::mem::needs_drop::<T>() {
+                drop(self.read());
+            }
             dealloc(self.ptr as *mut u8, Layout::new::<T>());
         }
     }
@@ -174,5 +177,142 @@ impl<T> From<&mut T> for Ptr<T> {
 impl<T: Debug> Debug for Ptr<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         unsafe { write!(f, "{:?}", self.as_ref()) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Ptr;
+    use std::mem::ManuallyDrop;
+
+    #[test]
+    fn test_new() {
+        let value = 10;
+        let ptr = Ptr::new(value);
+        unsafe {
+            assert_eq!(*ptr.as_ref(), value);
+        }
+    }
+
+    #[test]
+    fn test_null() {
+        let ptr: Ptr<i32> = Ptr::null();
+        assert!(ptr.is_null());
+    }
+
+    #[test]
+    fn test_as_ptr() {
+        let value = 20;
+        let ptr = Ptr::new(value);
+        let raw_ptr = ptr.as_ptr();
+        unsafe {
+            assert_eq!(*raw_ptr, value);
+        }
+    }
+
+    #[test]
+    fn test_as_ref() {
+        let value = 30;
+        let ptr = Ptr::new(value);
+        unsafe {
+            let value_ref = ptr.as_ref();
+            assert_eq!(*value_ref, value);
+        }
+    }
+
+    #[test]
+    fn test_as_mut() {
+        let value = 40;
+        let mut ptr = Ptr::new(value);
+        unsafe {
+            let value_mut = ptr.as_mut();
+            *value_mut = 50;
+            assert_eq!(*ptr.as_ref(), 50);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "ptr is null")]
+    fn test_as_ref_null() {
+        let ptr: Ptr<i32> = Ptr::null();
+        unsafe {
+            let _ = ptr.as_ref();
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "ptr is null")]
+    fn test_as_mut_null() {
+        let ptr: Ptr<i32> = Ptr::null();
+        unsafe {
+            let _ = ptr.as_mut();
+        }
+    }
+
+    #[test]
+    fn test_as_u64() {
+        let value = 60;
+        let ptr = Ptr::new(value);
+        let raw_u64 = ptr.as_u64();
+        let converted_ptr: Ptr<i32> = Ptr::from(raw_u64);
+        unsafe {
+            assert_eq!(*converted_ptr.as_ref(), value);
+        }
+    }
+
+    #[test]
+    fn test_drop_in_place() {
+        let value = ManuallyDrop::new(String::from("test"));
+        let ptr = Ptr::new(value);
+        unsafe {
+            ptr.drop_in_place();
+        }
+    }
+
+    #[test]
+    fn test_read() {
+        let value = 70;
+        let ptr = Ptr::new(value);
+        unsafe {
+            assert_eq!(ptr.read(), value);
+        }
+    }
+
+    #[test]
+    fn test_write() {
+        let value = 80;
+        let mut ptr = Ptr::new(value);
+        unsafe {
+            ptr.write(90);
+            assert_eq!(*ptr.as_ref(), 90);
+        }
+    }
+
+    #[test]
+    fn test_write_with_drop() {
+        let value = 100;
+        let mut ptr = Ptr::new(value);
+        unsafe {
+            ptr.write_with_drop(110);
+            assert_eq!(*ptr.as_ref(), 110);
+        }
+    }
+
+    #[test]
+    fn test_clone() {
+        let value = 120;
+        let ptr = Ptr::new(value);
+        let cloned_ptr = ptr.clone();
+        unsafe {
+            assert_eq!(*cloned_ptr.as_ref(), value);
+        }
+    }
+
+    #[test]
+    fn test_debug() {
+        let value = 130;
+        let ptr = Ptr::new(value);
+        let debug_str = format!("{:?}", ptr);
+        assert_eq!(debug_str, "130");
     }
 }

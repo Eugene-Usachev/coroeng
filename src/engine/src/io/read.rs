@@ -1,3 +1,4 @@
+use std::io::Error;
 use crate::coroutine::YieldStatus;
 
 /// The AsyncRead trait provides asynchronous read functionality for various types of data.
@@ -72,5 +73,5 @@ pub trait AsyncRead<T> {
     ///     }
     /// }
     /// ```
-    fn read(&mut self, res: *mut T) -> YieldStatus;
+    fn read(&mut self, res: *mut Result<T, Error>) -> YieldStatus;
 }
