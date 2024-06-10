@@ -90,7 +90,7 @@ impl<T: Debug> Debug for Local<T> {
     }
 }
 
-impl<T: Clone> Clone for Local<T> {
+impl<T> Clone for Local<T> {
     fn clone(&self) -> Self {
         self.inc_counter();
         Self {
@@ -222,7 +222,7 @@ mod tests {
     }
 
     #[test_local(crate="crate")]
-    #[should_panic(expected = "dropped")]
+    #[should_panic(expected = "MustDrop was dropped")]
     fn test_drop() {
         struct MustDrop {
             counter: u32
@@ -230,12 +230,20 @@ mod tests {
 
         impl Drop for MustDrop {
             fn drop(&mut self) {
-                panic!("dropped");
+                if self.counter != 0 {
+                    panic!("counter is not 0. So, probable, it was dropped before the loop below was finished. \
+                    In this test we expect the counter to be 0, to check that it was dropped only after all local clones were dropped.");
+                }
+                panic!("MustDrop was dropped");
             }
         }
 
         let local = Local::new(MustDrop { counter: 5 });
 
-        assert_eq!(local.get().counter, 5);
+        for i in 0..5 {
+            let md = local.clone().get_mut();
+            assert_eq!(md.counter, 5 - i);
+            md.counter -= 1;
+        }
     }
 }

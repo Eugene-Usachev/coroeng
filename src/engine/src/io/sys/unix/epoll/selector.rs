@@ -11,7 +11,7 @@ use crate::io::selector::Selector;
 use crate::io::sys::unix::epoll::net::setup_connection;
 use crate::io::sys::unix::check_error::check_error;
 use crate::io::sys::unix::net;
-use crate::io::PollState;
+use crate::io::State;
 use crate::scheduler::Scheduler;
 use crate::net::TcpStream;
 use crate::{write_err, write_ok};
@@ -23,7 +23,7 @@ pub(crate) const MAX_EPOLL_EVENTS_RETURNED: usize = 256;
 // We need to keep the size of the struct as small as possible to cache it.
 pub(crate) struct EpolledSelector {
     epoll: Epoll,
-    unhandled_states: Vec<Ptr<PollState>>,
+    unhandled_states: Vec<Ptr<State>>,
     events: [EpollEvent; MAX_EPOLL_EVENTS_RETURNED],
     req_buf: [u8; REQ_BUF_LEN]
 }
@@ -43,12 +43,12 @@ impl EpolledSelector {
 
     #[inline(always)]
     #[must_use]
-    fn handle_state(&mut self, state_ptr: Ptr<PollState>, scheduler: &mut Scheduler) -> bool {
+    fn handle_state(&mut self, state_ptr: Ptr<State>, scheduler: &mut Scheduler) -> bool {
         let state = unsafe { state_ptr.read() };
         match state {
-            PollState::Empty(_) => { false }
+            State::Empty(_) => { false }
 
-            PollState::AcceptTcp(state) => {
+            State::AcceptTcp(state) => {
                 let res = accept4(state.fd, SockFlag::SOCK_CLOEXEC);
                 if res.is_err() {
                     let err = res.unwrap_err();
@@ -66,11 +66,11 @@ impl EpolledSelector {
                 scheduler.handle_coroutine_state(self, state.coroutine)
             }
 
-            PollState::ConnectTcp(_state) => {
+            State::ConnectTcp(_state) => {
                 todo!();
             }
 
-            PollState::PollTcp(state) => {
+            State::PollTcp(state) => {
                 let res = recvfrom::<()>(state.fd, &mut self.req_buf);
                 if res.is_err() {
                     write_err!(state.result, Error::from(res.unwrap_err_unchecked()));
@@ -83,11 +83,11 @@ impl EpolledSelector {
                 scheduler.handle_coroutine_state(self, state.coroutine)
             }
 
-            PollState::ReadTcp(_) => {
+            State::ReadTcp(_) => {
                 panic!("[BUG] Epolled Selector handled State::ReadTcp. Please report this issue.");
             }
 
-            PollState::WriteTcp(mut state) => {
+            State::WriteTcp(mut state) => {
                 let fd = state.fd;
                 let res = unsafe { write(BorrowedFd::borrow_raw(fd), state.buffer.as_ref()) };
 
@@ -106,7 +106,7 @@ impl EpolledSelector {
                 scheduler.handle_coroutine_state(self, state.coroutine)
             }
 
-            PollState::WriteAllTcp(mut state) => {
+            State::WriteAllTcp(mut state) => {
                 let fd = state.fd;
                 let mut res;
                 loop {
@@ -127,7 +127,7 @@ impl EpolledSelector {
                 scheduler.handle_coroutine_state(self, state.coroutine)
             }
 
-            PollState::CloseTcp(state) => {
+            State::CloseTcp(state) => {
                 let fd = state.fd;
                 let _ = self.deregister(state.fd);
                 unsafe { net::close_connection(&BorrowedFd::borrow_raw(fd)); }
@@ -169,7 +169,7 @@ impl Selector for EpolledSelector {
     }
 
     #[inline(always)]
-    fn register(&mut self, state_ptr: Ptr<PollState>) {
+    fn register(&mut self, state_ptr: Ptr<State>) {
         let fd = unsafe { state_ptr.as_ref() }.fd();
         let res = unsafe {
             self.epoll.add(BorrowedFd::borrow_raw(fd), EpollEvent::new(EpollFlags::EPOLLIN, state_ptr.as_u64()))
@@ -187,16 +187,16 @@ impl Selector for EpolledSelector {
         }
     }
 
-    fn write(&mut self, state_ref: Ptr<PollState>) {
+    fn write(&mut self, state_ref: Ptr<State>) {
         self.unhandled_states.push(state_ref);
     }
 
-    fn write_all(&mut self, state_ref: Ptr<PollState>) {
+    fn write_all(&mut self, state_ref: Ptr<State>) {
         self.unhandled_states.push(state_ref);
     }
 
     #[inline(always)]
-    fn close_connection(&mut self, state_ref: Ptr<PollState>) {
+    fn close_connection(&mut self, state_ref: Ptr<State>) {
         self.unhandled_states.push(state_ref);
     }
 }

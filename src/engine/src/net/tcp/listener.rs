@@ -3,9 +3,9 @@ use std::io::Error;
 use std::net::{SocketAddr};
 use std::os::fd::{IntoRawFd, RawFd};
 use crate::coroutine::{CoroutineImpl, YieldStatus};
-use crate::io::sys::unix::epoll::net::get_tcp_listener_fd;
+use crate::io::sys::unix::net::get_tcp_listener_fd;
 use crate::net::tcp::TcpStream;
-use crate::io::PollState;
+use crate::io::State;
 use crate::{local_scheduler};
 use crate::utils::Ptr;
 
@@ -62,24 +62,21 @@ use crate::utils::Ptr;
 /// }
 /// ```
 pub struct TcpListener {
-    pub(crate) state_ptr: Ptr<PollState>,
-    /// OwnedFd is required for Drop
-    pub(crate) is_registered: bool
+    pub(crate) state_ptr: Ptr<State>
 }
 
 impl TcpListener {
     /// Creates a new TcpListener from an existing fd.
     pub fn from_fd(fd: RawFd) -> Self {
         Self {
-            state_ptr: Ptr::new(PollState::new_empty(fd)),
-            is_registered: false
+            state_ptr: Ptr::new(State::new_empty(fd))
         }
     }
 
     /// Returns the state_ptr of the [`TcpListener`].
     ///
     /// Uses for low-level work with the scheduler. If you don't know what it is, don't use it.
-    pub fn state_ptr(&mut self) -> Ptr<PollState> {
+    pub fn state_ptr(&mut self) -> Ptr<State> {
         self.state_ptr
     }
 
@@ -132,20 +129,16 @@ impl TcpListener {
     /// }
     /// ```
     pub fn accept(&mut self, res: *mut Result<TcpStream, Error>) -> YieldStatus {
-        let is_registered = self.is_registered;
-        if !is_registered {
-            self.is_registered = true;
-        }
-        YieldStatus::tcp_accept(is_registered, self.state_ptr, res)
+        YieldStatus::tcp_accept(self.state_ptr, res)
     }
 
     /// Closes the [`TcpListener`] by state_id. After closing, the [`TcpListener`] can not be used.
-    fn close(state_ref: Ptr<PollState>) -> YieldStatus {
+    fn close(state_ref: Ptr<State>) -> YieldStatus {
         YieldStatus::tcp_close(state_ref)
     }
 }
 
-fn close_listener(state_ptr: Ptr<PollState>) -> CoroutineImpl {
+fn close_listener(state_ptr: Ptr<State>) -> CoroutineImpl {
     Box::pin(#[coroutine] static move || {
         yield TcpListener::close(state_ptr);
         unsafe { state_ptr.deallocate(); }
@@ -155,10 +148,6 @@ fn close_listener(state_ptr: Ptr<PollState>) -> CoroutineImpl {
 impl Drop for TcpListener {
     fn drop(&mut self) {
         let state_ptr = self.state_ptr;
-        if self.is_registered {
-            local_scheduler().sched(close_listener(state_ptr));
-        } else {
-            unsafe { state_ptr.deallocate(); }
-        }
+        local_scheduler().sched(close_listener(state_ptr));
     }
 }

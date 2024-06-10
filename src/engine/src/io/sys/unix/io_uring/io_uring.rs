@@ -1,13 +1,13 @@
 use std::collections::VecDeque;
 use std::cell::UnsafeCell;
 use std::io::Error;
-use std::os::fd::{AsRawFd, IntoRawFd, RawFd};
+use std::os::fd::{AsRawFd, IntoRawFd};
 use std::{mem, ptr};
 use std::intrinsics::unlikely;
 use io_uring::{cqueue, IoUring, opcode, squeue, types};
 use io_uring::types::{SubmitArgs, Timespec};
 use crate::buf::buffer;
-use crate::io::{Selector, PollState};
+use crate::io::{Selector, State};
 use crate::net::TcpStream;
 use crate::scheduler::Scheduler;
 use crate::utils::{Ptr};
@@ -108,14 +108,14 @@ impl IoUringSelector {
 
     #[inline(always)]
     #[must_use]
-    fn handle_completion(&mut self, scheduler: &mut Scheduler, ret: i32, ptr: Ptr<PollState>) -> bool {
+    fn handle_completion(&mut self, scheduler: &mut Scheduler, ret: i32, ptr: Ptr<State>) -> bool {
         let state = unsafe { ptr.read() };
 
         match state {
-            PollState::Empty(_) => {
+            State::Empty(_) => {
                 panic!("[BUG] tried to handle an empty state in [`IoUringSelector`]. Please report this issue.")
             }
-            PollState::AcceptTcp(state) => {
+            State::AcceptTcp(state) => {
                 handle_ret!(ret, state, scheduler, self);
 
                 let accepted_fd = ret;
@@ -123,7 +123,7 @@ impl IoUringSelector {
 
                 scheduler.handle_coroutine_state(self, state.coroutine)
             }
-            PollState::ConnectTcp(state) => {
+            State::ConnectTcp(state) => {
                 handle_ret!(ret, state, scheduler, self);
 
                 write_ok!(state.result, TcpStream::new(state.socket.into_raw_fd()));
@@ -132,15 +132,15 @@ impl IoUringSelector {
                 unsafe { ptr.drop_in_place() };
                 res
             }
-            PollState::PollTcp(state) => {
+            State::PollTcp(state) => {
                 handle_ret!(ret, state, scheduler, self);
 
-                unsafe { ptr.write(PollState::new_read_tcp(state.fd, buffer(), state.coroutine, state.result)) };
+                unsafe { ptr.write(State::new_read_tcp(state.fd, buffer(), state.coroutine, state.result)) };
 
                 self.register(ptr);
                 false
             }
-            PollState::ReadTcp(state) => {
+            State::ReadTcp(state) => {
                 handle_ret!(ret, state, scheduler, self);
 
                 let slice = unsafe { mem::transmute(&state.buffer.slice[..ret as usize]) };
@@ -148,7 +148,7 @@ impl IoUringSelector {
 
                 scheduler.handle_coroutine_state(self, state.coroutine)
             }
-            PollState::WriteTcp(mut state) => {
+            State::WriteTcp(mut state) => {
                 handle_ret!(ret, state, scheduler, self);
 
                 if ret as usize == state.buffer.len() {
@@ -160,7 +160,7 @@ impl IoUringSelector {
 
                 scheduler.handle_coroutine_state(self, state.coroutine)
             }
-            PollState::WriteAllTcp(mut state) => {
+            State::WriteAllTcp(mut state) => {
                 handle_ret!(ret, state, scheduler, self);
 
                 if ret as usize == state.buffer.len() {
@@ -168,13 +168,13 @@ impl IoUringSelector {
                     scheduler.handle_coroutine_state(self, state.coroutine)
                 } else {
                     state.buffer.set_offset(state.buffer.offset() + ret as usize);
-                    unsafe { ptr.write(PollState::new_write_all_tcp(state.fd, state.buffer, state.coroutine, state.result)) };
+                    unsafe { ptr.write(State::new_write_all_tcp(state.fd, state.buffer, state.coroutine, state.result)) };
 
                     self.register(ptr);
                     false
                 }
             }
-            PollState::CloseTcp(state) => {
+            State::CloseTcp(state) => {
                 handle_ret_without_result!(ret, state, scheduler, self);
 
                 scheduler.handle_coroutine_state(self, state.coroutine)
@@ -184,13 +184,6 @@ impl IoUringSelector {
 }
 
 impl Selector for IoUringSelector {
-    #[inline(always)]
-    fn need_reregister(&self) -> bool {
-        true
-    }
-
-    fn deregister(&mut self, _fd: RawFd) {}
-
     #[inline(always)]
     fn poll(&mut self, scheduler: &mut Scheduler) -> Result<bool, ()> {
         if self.submit().is_err() {
@@ -213,36 +206,36 @@ impl Selector for IoUringSelector {
     }
 
     #[inline(always)]
-    fn register(&mut self, state_ptr: Ptr<PollState>) {
+    fn register(&mut self, state_ptr: Ptr<State>) {
         let state = unsafe { state_ptr.as_mut() };
 
         let mut entry = match state {
-            PollState::Empty(_) => { panic!("[BUG] tried to register an empty state in [`IoUringSelector`]. Please report this issue.") }
-            PollState::AcceptTcp(state) => {
+            State::Empty(_) => { panic!("[BUG] tried to register an empty state in [`IoUringSelector`]. Please report this issue.") }
+            State::AcceptTcp(state) => {
                 opcode::Accept::new(types::Fd(state.fd), ptr::null_mut(), ptr::null_mut())
                     .build()
             }
-            PollState::ConnectTcp(state) => {
+            State::ConnectTcp(state) => {
                 opcode::Connect::new(types::Fd(state.socket.as_raw_fd()), state.address.as_ptr(), state.address.len())
                     .build()
             }
-            PollState::PollTcp(state) => {
+            State::PollTcp(state) => {
                 opcode::PollAdd::new(types::Fd(state.fd), libc::POLLIN as _)
                     .build()
             }
-            PollState::ReadTcp(state) => {
+            State::ReadTcp(state) => {
                 opcode::Recv::new(types::Fd(state.fd), state.buffer.as_mut_ptr(), state.buffer.cap() as _)
                     .build()
             }
-            PollState::WriteTcp(state) => {
+            State::WriteTcp(state) => {
                 opcode::Send::new(types::Fd(state.fd), state.buffer.as_ptr(), state.buffer.len() as _)
                     .build()
             }
-            PollState::WriteAllTcp(state) => {
+            State::WriteAllTcp(state) => {
                 opcode::Send::new(types::Fd(state.fd), state.buffer.as_ptr(), state.buffer.len() as _)
                     .build()
             }
-            PollState::CloseTcp(state) => {
+            State::CloseTcp(state) => {
                 opcode::Close::new(types::Fixed(state.fd as u32))
                     .build()
             }
@@ -250,20 +243,5 @@ impl Selector for IoUringSelector {
 
         entry = entry.user_data(state_ptr.as_u64());
         self.add_sqe(entry);
-    }
-
-    #[inline(always)]
-    fn write(&mut self, state_ref: Ptr<PollState>) {
-        self.register(state_ref);
-    }
-
-    #[inline(always)]
-    fn write_all(&mut self, state_ref: Ptr<PollState>) {
-        self.register(state_ref);
-    }
-
-    #[inline(always)]
-    fn close_connection(&mut self, state_ref: Ptr<PollState>) {
-        self.register(state_ref);
     }
 }

@@ -1,3 +1,5 @@
+// TODO docs
+
 use std::io::Error;
 use std::fmt::{Debug, Formatter};
 import_fd_for_os!();
@@ -60,44 +62,65 @@ pub struct CloseTcpState {
 /// # Why using [`Box`]?
 ///
 /// Typically, most states are [`PollTcpState`], which weighs 32 bytes (40 including the enum itself).
-/// At this time, the heaviest states considering the enum itself weigh 80 bytes, which makes the entire enum [`PollState`] weigh 80 bytes.
+/// At this time, the heaviest states considering the enum itself weigh 80 bytes, which makes the entire enum [`State`] weigh 80 bytes.
 /// To avoid this, states are stacked in a [`Box`], thereby allowing the enum itself to weigh 16 bytes (any state weighs 16 bytes + its own weight, except [`EmptyState`]).
 /// This allows to reduce the overall weight of all states (in the example with [`PollTcpState`] State([`PollTcpState`]) now weighs 48 bytes).
 /// Since states are only used in IO operations, which are much more expensive than dereferencing, there is no performance impact.
-pub enum PollState {
+pub enum State {
     Empty(EmptyState),
     AcceptTcp(Box<AcceptTcpState>),
     ConnectTcp(Box<ConnectTcpState>),
     PollTcp(Box<PollTcpState>),
     ReadTcp(Box<ReadTcpState>),
+    /// Tells the selector that [`WriteTcpState`](crate::io::WriteTcpState) or another writable [`State`] is ready.
+    /// So, this method returns before the write syscall is done. The writing will be done in [`Selector::poll`].
+    ///
+    /// # Panics
+    ///
+    /// Will lead to panic if the [`State`] does not exist at the time of [`Selector::poll`].
+    ///
+    /// # Note
+    ///
+    /// This method will lead to one syscall. Only the part of the buffer will be written.
+    /// The number of bytes written will be stored in the result variable.
     WriteTcp(Box<WriteTcpState>),
+    /// Tells the selector that [`WriteAllTcpState`](crate::io::WriteAllTcpState) or another writable [`State`] is ready.
+    /// So, this method returns before the write syscall is done. The writing will be done in [`Selector::poll`].
+    ///
+    /// # Panics
+    ///
+    /// Will lead to panic if the [`State`] does not exist at the time of [`Selector::poll`].
+    ///
+    /// # Note
+    ///
+    /// This method can lead to one or more syscalls.
     WriteAllTcp(Box<WriteAllTcpState>),
     CloseTcp(Box<CloseTcpState>)
 }
 
-impl PollState {
+impl State {
     #[inline(always)]
     pub fn fd(&self) -> RawFd {
         match self {
-            PollState::Empty(state) => { state.fd }
-            PollState::AcceptTcp(state) => { state.fd }
-            PollState::PollTcp(state) => { state.fd }
-            PollState::ReadTcp(state) => { state.fd }
-            PollState::WriteTcp(state) => { state.fd }
-            PollState::WriteAllTcp(state) => { state.fd }
-            PollState::CloseTcp(state) => { state.fd }
+            State::Empty(state) => { state.fd }
+            State::AcceptTcp(state) => { state.fd }
+            State::PollTcp(state) => { state.fd }
+            State::ReadTcp(state) => { state.fd }
+            State::WriteTcp(state) => { state.fd }
+            State::WriteAllTcp(state) => { state.fd }
+            State::CloseTcp(state) => { state.fd }
 
             _ => { panic!("[BUG] tried to get fd from {self:?} token") }
         }
     }
 
     pub fn new_empty(fd: RawFd) -> Self {
-        PollState::Empty(EmptyState { fd })
+        State::Empty(EmptyState { fd })
     }
 
     #[inline(always)]
     pub fn new_accept_tcp(listener: RawFd, coroutine: CoroutineImpl, result: *mut Result<TcpStream, Error>) -> Self {
-        PollState::AcceptTcp(Box::new(AcceptTcpState { fd: listener, coroutine, result }))
+        State::AcceptTcp(Box::new(AcceptTcpState { fd: listener, coroutine, result }))
     }
 
     #[inline(always)]
@@ -110,55 +133,55 @@ impl PollState {
         }
 
         unsafe {
-            Ok(PollState::ConnectTcp(Box::new(ConnectTcpState { address, socket: socket_.unwrap_unchecked(), coroutine, result })))
+            Ok(State::ConnectTcp(Box::new(ConnectTcpState { address, socket: socket_.unwrap_unchecked(), coroutine, result })))
         }
     }
 
     #[inline(always)]
     pub fn new_poll_tcp(stream: RawFd, coroutine: CoroutineImpl, result: *mut Result<&'_ [u8], Error>) -> Self {
         let result = unsafe { std::mem::transmute(result) };
-        PollState::PollTcp(Box::new(PollTcpState { fd: stream, coroutine, result }))
+        State::PollTcp(Box::new(PollTcpState { fd: stream, coroutine, result }))
     }
 
     #[inline(always)]
     pub fn new_read_tcp(stream: RawFd, buf: Buffer, coroutine: CoroutineImpl, result: *mut Result<&'_ [u8], Error>) -> Self {
         let result = unsafe { std::mem::transmute(result) };
-        PollState::ReadTcp(Box::new(ReadTcpState { fd: stream, buffer: buf, coroutine, result }))
+        State::ReadTcp(Box::new(ReadTcpState { fd: stream, buffer: buf, coroutine, result }))
     }
 
     #[inline(always)]
     pub fn new_write_tcp(stream: RawFd, buf: Buffer, coroutine: CoroutineImpl, result: *mut Result<Option<Buffer>, Error>) -> Self {
-        PollState::WriteTcp(Box::new(WriteTcpState { fd: stream, buffer: buf, coroutine, result }))
+        State::WriteTcp(Box::new(WriteTcpState { fd: stream, buffer: buf, coroutine, result }))
     }
 
     #[inline(always)]
     pub fn new_write_all_tcp(stream: RawFd, buf: Buffer, coroutine: CoroutineImpl, result: *mut Result<(), Error>) -> Self {
-        PollState::WriteAllTcp(Box::new(WriteAllTcpState { fd: stream, buffer: buf, coroutine, result }))
+        State::WriteAllTcp(Box::new(WriteAllTcpState { fd: stream, buffer: buf, coroutine, result }))
     }
 
     #[inline(always)]
     pub fn new_close_tcp(stream: RawFd, coroutine: CoroutineImpl) -> Self {
-        PollState::CloseTcp(Box::new(CloseTcpState { fd: stream, coroutine }))
+        State::CloseTcp(Box::new(CloseTcpState { fd: stream, coroutine }))
     }
 }
 
-impl Debug for PollState {
+impl Debug for State {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            PollState::Empty(state) => { write!(f, "Empty, fd: {:?}", state.fd) }
-            PollState::AcceptTcp(state) => { write!(f, "AcceptTcp, fd: {:?}", state.fd) }
-            PollState::ConnectTcp(state) => {
+            State::Empty(state) => { write!(f, "Empty, fd: {:?}", state.fd) }
+            State::AcceptTcp(state) => { write!(f, "AcceptTcp, fd: {:?}", state.fd) }
+            State::ConnectTcp(state) => {
                 write!(
                     f,
                     "ConnectTcp, addr: {:?}",
                     state.address
                 )
             }
-            PollState::PollTcp(state) => { write!(f, "PollTcp, fd: {:?}", state.fd) }
-            PollState::ReadTcp(state) => { write!(f, "ReadTcp, fd: {:?}", state.fd) }
-            PollState::WriteTcp(state) => { write!(f, "WriteTcp, fd: {:?}", state.fd) }
-            PollState::WriteAllTcp(state) => { write!(f, "WriteAllTcp, fd: {:?}", state.fd) }
-            PollState::CloseTcp(state) => { write!(f, "CloseTcp, fd: {:?}", state.fd) }
+            State::PollTcp(state) => { write!(f, "PollTcp, fd: {:?}", state.fd) }
+            State::ReadTcp(state) => { write!(f, "ReadTcp, fd: {:?}", state.fd) }
+            State::WriteTcp(state) => { write!(f, "WriteTcp, fd: {:?}", state.fd) }
+            State::WriteAllTcp(state) => { write!(f, "WriteAllTcp, fd: {:?}", state.fd) }
+            State::CloseTcp(state) => { write!(f, "CloseTcp, fd: {:?}", state.fd) }
         }
     }
 }

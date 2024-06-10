@@ -7,13 +7,13 @@ use std::ops::{Coroutine, CoroutineState};
 use std::ptr::null_mut;
 use std::time::Instant;
 use proc::coro;
-use crate::cfg::{config_selector, SelectorType};
 use crate::coroutine::coroutine::{CoroutineImpl};
 use crate::coroutine::{end, yield_now, YieldStatus};
-use crate::io::sys::unix::{EpolledSelector, IoUringSelector};
-use crate::io::{Selector, PollState};
+use crate::io::sys::unix::{IoUringSelector};
+use crate::io::{Selector, State};
 use crate::net::{TcpListener};
 use crate::{write_err};
+use crate::buf::buffer;
 use crate::run::uninit;
 use crate::sleep::SleepingCoroutine;
 use crate::utils::Ptr;
@@ -131,17 +131,21 @@ impl Scheduler {
         match res {
             CoroutineState::Yielded(status) => {
                 match status {
-                    YieldStatus::Sleep(dur) => {
-                        let sleep = SleepingCoroutine::new(dur, task);
-                        self.sleeping.insert(sleep);
-                    }
-
                     YieldStatus::Yield => {
                         self.task_queue.push_front(task);
                     }
 
                     YieldStatus::End => {
                         return true;
+                    }
+
+                    YieldStatus::Sleep(dur) => {
+                        let sleep = SleepingCoroutine::new(dur, task);
+                        self.sleeping.insert(sleep);
+                    }
+
+                    YieldStatus::NewFile(status) => {
+
                     }
 
                     YieldStatus::NewTcpListener(status) => {
@@ -152,7 +156,7 @@ impl Scheduler {
                     }
 
                     YieldStatus::TcpConnect(status) => {
-                        let state_ = PollState::new_connect_tcp(socket2::SockAddr::from(status.address), task, status.stream_ptr);
+                        let state_ = State::new_connect_tcp(socket2::SockAddr::from(status.address), task, status.stream_ptr);
                         if state_.is_err() {
                             let (error, task) = unsafe { state_.unwrap_err_unchecked() };
                             write_err!(status.stream_ptr, error);
@@ -166,42 +170,37 @@ impl Scheduler {
                     YieldStatus::TcpAccept(status) => {
                         let state_ptr = status.state_ref;
                         let state_ref = unsafe { state_ptr.as_ref() };
-                        unsafe { state_ptr.write(PollState::new_accept_tcp(state_ref.fd(), task, status.result_ptr)) };
-                        if selector.need_reregister() || !status.is_registered {
-                            selector.register(state_ptr);
-                        }
+                        unsafe { state_ptr.write(State::new_accept_tcp(state_ref.fd(), task, status.result_ptr)) };
+                        selector.register(state_ptr);
                     }
 
                     YieldStatus::TcpRead(status) => {
                         let state_ptr = status.state_ref;
                         let state_ref = unsafe { state_ptr.as_ref() };
-                        unsafe { state_ptr.write(PollState::new_poll_tcp(state_ref.fd(), task, status.result_ptr)) };
-                        if selector.need_reregister() || !status.is_registered {
-                            selector.register(state_ptr);
-                        }
+                        unsafe { state_ptr.write(State::new_read_tcp(state_ref.fd(), buffer(), task, status.result_ptr)) };
+                        selector.register(state_ptr);
                     }
 
                     YieldStatus::TcpWrite(status) => {
                         let state_ptr = status.state_ref;
                         let state_ref = unsafe { state_ptr.as_ref() };
                         let fd = state_ref.fd();
-                        unsafe { state_ptr.write(PollState::new_write_tcp(fd, status.buffer, task, status.result_ptr)) };
-                        selector.write(state_ptr);
+                        unsafe { state_ptr.write(State::new_write_tcp(fd, status.buffer, task, status.result_ptr)) };
+                        selector.register(state_ptr);
                     }
 
                     YieldStatus::TcpWriteAll(status) => {
                         let state_ptr = status.state_ref;
                         let state_ref = unsafe { state_ptr.as_ref() };
-                        unsafe { state_ptr.write(PollState::new_write_all_tcp(state_ref.fd(), status.buffer, task, status.result_ptr)) };
-                        selector.write_all(state_ptr);
+                        unsafe { state_ptr.write(State::new_write_all_tcp(state_ref.fd(), status.buffer, task, status.result_ptr)) };
+                        selector.register(state_ptr);
                     }
 
                     YieldStatus::TcpClose(status) => {
                         let state_ptr = status.state_ptr;
                         let state_ref = unsafe { state_ptr.as_mut() };
-                        unsafe { state_ptr.write(PollState::new_close_tcp(state_ref.fd(), task)) };
-                        selector.close_connection(state_ptr);
-                        //self.handle_coroutine_state(selector, task);
+                        unsafe { state_ptr.write(State::new_close_tcp(state_ref.fd(), task)) };
+                        selector.register(state_ptr);
                     }
                 }
             }
@@ -225,10 +224,12 @@ impl Scheduler {
 
     /// Start the [`Scheduler`] and create [`Selector`].
     pub fn run(&mut self, main_func: CoroutineImpl) {
-        match config_selector() {
-            SelectorType::Poller => self.run_with_selector(main_func, EpolledSelector::new().expect("Failed to create epoll selector")),
-            SelectorType::Ring => self.run_with_selector(main_func, IoUringSelector::new()),
-        }
+        // TODO maybe r?
+        // match config_selector() {
+        //     SelectorType::Poller => self.run_with_selector(main_func, EpolledSelector::new().expect("Failed to create epoll selector")),
+        //     SelectorType::Ring => self.run_with_selector(main_func, IoUringSelector::new()),
+        // }
+        self.run_with_selector(main_func, IoUringSelector::new())
     }
 
     /// Start the background work. Specifically, it:
