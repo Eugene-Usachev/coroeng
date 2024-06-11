@@ -5,6 +5,7 @@
 #![feature(fn_traits)]
 #![feature(panic_info_message)]
 #![feature(negative_impls)]
+#![feature(slice_ptr_get)]
 
 pub mod coroutine;
 pub mod macros;

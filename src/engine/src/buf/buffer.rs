@@ -1,8 +1,10 @@
 use std::fmt::Debug;
 use std::intrinsics::unlikely;
 use std::io::{Read, Write};
-use std::{cmp, mem};
+use std::{cmp};
+use std::alloc::{alloc, dealloc, Layout};
 use std::cmp::{max};
+use std::ptr::{NonNull, slice_from_raw_parts_mut};
 use crate::buf::buf_pool::buf_pool;
 use crate::buf::buffer;
 use crate::cfg::config_buf_len;
@@ -41,12 +43,27 @@ use crate::cfg::config_buf_len;
 /// 
 /// [`BufPool`]: crate::buf::BufPool
 pub struct Buffer {
-    pub(crate) slice: Box<[u8]>,
+    pub(crate) slice: NonNull<[u8]>,
     written: usize,
     offset: usize
 }
 
 impl Buffer {
+    /// Creates raw slice with given capacity. This code avoids checking zero capacity.
+    ///
+    /// # Safety
+    /// capacity > 0
+    #[inline(always)]
+    fn raw_slice(capacity: usize) -> NonNull<[u8]> {
+        let layout = match Layout::array::<u8>(capacity) {
+            Ok(layout) => layout,
+            Err(_) => panic!("Cannot create slice with capacity {capacity}. Capacity overflow."),
+        };
+        unsafe {
+            NonNull::new_unchecked(slice_from_raw_parts_mut(alloc(layout), capacity))
+        }
+    }
+
     /// Creates new buffer with given size. This buffer will not be put to the pool.
     /// So, use it only for creating a buffer with specific size.
     ///
@@ -55,36 +72,30 @@ impl Buffer {
     #[inline(always)]
     pub fn new(size: usize) -> Self {
         if unlikely(size == 0) {
-            panic!("Cannot create Buffer with size 0. Size must be > 0");
+            panic!("Cannot create Buffer with size 0. Size must be > 0.");
         }
-        let mut v = Vec::with_capacity(size);
-        unsafe { v.set_len(size) };
-        Buffer {
-            slice: v.into_boxed_slice(),
-            written: 0,
-            offset: 0
-        }
-    }
 
-    /// Creates new zeroed buffer. It is used only in drop!
-    #[inline(always)]
-    fn zeroed() -> Self {
         Buffer {
-            slice: Box::new([0; 0]),
+            slice: Self::raw_slice(size),
             written: 0,
             offset: 0
         }
     }
 
     /// Creates a new buffer from a pool with the given size.
+    #[inline(always)]
     pub(crate) fn new_from_pool(size: usize) -> Self {
-        let mut v = Vec::with_capacity(size);
-        unsafe { v.set_len(size) };
         Buffer {
-            slice: v.into_boxed_slice(),
+            slice: Self::raw_slice(size),
             written: 0,
             offset: 0
         }
+    }
+
+    /// Returns `true` if the buffer is empty.
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.written == 0
     }
 
     /// Returns how many bytes have been written into the buffer, exclusive offset.
@@ -92,6 +103,12 @@ impl Buffer {
     #[inline(always)]
     pub fn len(&self) -> usize {
         self.written - self.offset
+    }
+
+    /// Increases written on diff
+    #[inline(always)]
+    pub fn add_written(&mut self, diff: usize) {
+        self.written += diff;
     }
 
     /// Sets written.
@@ -140,21 +157,22 @@ impl Buffer {
             Buffer::new(new_size)
         };
 
-        new_buf.slice[..self.written].copy_from_slice(&self.slice[..self.written]);
         new_buf.written = self.written;
+        new_buf.as_mut()[..self.written].copy_from_slice(&self.as_ref()[..self.written]);
 
         *self = new_buf;
     }
 
     /// Appends data to the buffer. If a capacity is not enough, the buffer will be resized and will not be put to the pool.
     // TODO: need test
+    #[inline(always)]
     pub fn append(&mut self, buf: &[u8]) {
         let len = buf.len();
         if unlikely(len > self.slice.len() - self.written) {
             self.resize(max(self.written + len, self.real_cap() * 2));
         }
 
-        self.slice[self.written..self.written + len].copy_from_slice(buf);
+        unsafe { self.slice.as_mut()[self.written..self.written + len].copy_from_slice(buf); }
         self.written += len;
     }
 
@@ -163,8 +181,9 @@ impl Buffer {
     /// # Note
     ///
     /// The pointer is shifted by `offset`.
+    #[inline(always)]
     pub fn as_ptr(&self) -> *const u8 {
-        unsafe { self.slice.as_ptr().offset(self.offset as isize) }
+        unsafe { self.slice.as_ptr().as_mut_ptr().offset(self.offset as isize) }
     }
 
     /// Returns a mutable pointer to the buffer.
@@ -172,17 +191,20 @@ impl Buffer {
     /// # Note
     ///
     /// The pointer is shifted by `offset`.
+    #[inline(always)]
     pub fn as_mut_ptr(&mut self) -> *mut u8 {
         unsafe { self.slice.as_mut_ptr().offset(self.offset as isize) }
     }
 
     /// Clears the buffer.
+    #[inline(always)]
     pub fn clear(&mut self) {
         self.written = 0;
         self.offset = 0;
     }
 
     /// Puts the buffer to the pool. You can not to use it, and then this method will be called automatically by drop.
+    #[inline(always)]
     pub fn release(self) {
         buf_pool().put(self);
     }
@@ -191,8 +213,9 @@ impl Buffer {
     ///
     /// # Safety
     /// - [`buf.real_cap`](#method.real_cap)() ==[` config_buf_len`](config_buf_len)()
-    pub fn release_unchecked(self) {
-        buf_pool().put_unchecked(self);
+    #[inline(always)]
+    pub unsafe fn release_unchecked(self) {
+        unsafe { buf_pool().put_unchecked(self) };
     }
 }
 
@@ -210,7 +233,7 @@ impl Write for Buffer {
 impl Read for Buffer {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let len = cmp::min(buf.len(), self.written - self.offset);
-        buf[..len].copy_from_slice(&self.slice[self.offset..self.offset + len]);
+        buf[..len].copy_from_slice(&self.as_ref()[self.offset..self.offset + len]);
         self.offset += len;
         Ok(len)
     }
@@ -218,13 +241,13 @@ impl Read for Buffer {
 
 impl AsRef<[u8]> for Buffer {
     fn as_ref(&self) -> &[u8] {
-        &self.slice[self.offset..self.written]
+        unsafe { &self.slice.as_ref()[self.offset..self.written] }
     }
 }
 
 impl AsMut<[u8]> for Buffer {
     fn as_mut(&mut self) -> &mut [u8] {
-        &mut self.slice[self.offset..self.written]
+        unsafe { &mut self.slice.as_mut()[self.offset..self.written] }
     }
 }
 
@@ -237,8 +260,14 @@ impl Debug for Buffer {
 impl Drop for Buffer {
     fn drop(&mut self) {
         if self.real_cap() == config_buf_len() {
-            let buf = mem::replace(self, Buffer::zeroed());
-            buf.release();
+            let buf = Buffer {
+                slice: self.slice,
+                written: self.written,
+                offset: self.offset
+            };
+            unsafe { buf.release_unchecked() };
+        } else {
+            unsafe { dealloc(self.slice.as_mut_ptr(), Layout::array::<u8>(self.real_cap()).unwrap_unchecked())}
         }
     }
 }
@@ -251,6 +280,24 @@ mod tests {
     fn test_new() {
         let buf = Buffer::new(1);
         assert_eq!(buf.cap(), 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "Cannot create Buffer with size 0. Size must be > 0.")]
+    fn test_new_panic() {
+        Buffer::new(0);
+    }
+
+    #[test]
+    fn test_add_written() {
+        let mut buf = Buffer::new(100);
+        assert_eq!(buf.len(), 0);
+
+        buf.add_written(10);
+        assert_eq!(buf.len(), 10);
+
+        buf.add_written(20);
+        assert_eq!(buf.len(), 30);
     }
 
     #[test]
@@ -305,5 +352,15 @@ mod tests {
         assert_eq!(buf.as_ref(), &[]);
         assert_eq!(buf.cap(), 10);
         assert_eq!(buf.offset(), 0);
+    }
+
+    #[test]
+    fn test_is_empty() {
+        let mut buf = Buffer::new(5);
+        assert!(buf.is_empty());
+        buf.append(&[1, 2, 3]);
+        assert!(!buf.is_empty());
+        buf.clear();
+        assert!(buf.is_empty());
     }
 }

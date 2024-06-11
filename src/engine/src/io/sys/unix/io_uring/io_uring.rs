@@ -140,11 +140,11 @@ impl IoUringSelector {
                 self.register(ptr);
                 false
             }
-            State::ReadTcp(state) => {
+            State::ReadTcp(mut state) => {
                 handle_ret!(ret, state, scheduler, self);
 
-                let slice = unsafe { mem::transmute(&state.buffer.slice[..ret as usize]) };
-                write_ok!(state.result, slice);
+                state.buffer.add_written(ret as usize);
+                write_ok!(state.result, state.buffer);
 
                 scheduler.handle_coroutine_state(self, state.coroutine)
             }

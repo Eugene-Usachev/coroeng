@@ -49,8 +49,8 @@ pub struct TcpRead {
     /// The state ID associated with the TCP read operation.
     pub(crate) state_ref: Ptr<State>,
     /// Pointer to store the result of the TCP read operation.
-    /// If success, the result will contain a slice of bytes read.
-    pub(crate) result_ptr: *mut Result<&'static [u8], Error>,
+    /// If success, the result will contain [`Buffer`].
+    pub(crate) result_ptr: *mut Result<Buffer, Error>,
 }
 
 /// Represents a TCP write operation.
@@ -205,7 +205,7 @@ impl YieldStatus {
     }
 
     /// Create a YieldStatus variant [`TcpRead`](YieldStatus::TcpRead).
-    pub fn tcp_read(state_ref: Ptr<State>, result_ptr: *mut Result<&'static [u8], Error>) -> Self {
+    pub fn tcp_read(state_ref: Ptr<State>, result_ptr: *mut Result<Buffer, Error>) -> Self {
         YieldStatus::TcpRead(TcpRead { state_ref, result_ptr })
     }
 

@@ -26,17 +26,18 @@ pub struct ConnectTcpState {
     pub(crate) result: *mut Result<TcpStream, Error>
 }
 
+// TODO r, do we need it?
 pub struct PollTcpState {
     pub(crate) fd: RawFd,
     pub(crate) coroutine: CoroutineImpl,
-    pub(crate) result: *mut Result<&'static [u8], Error>
+    pub(crate) result: *mut Result<Buffer, Error>
 }
 
 pub struct ReadTcpState {
     pub(crate) fd: RawFd,
     pub(crate) buffer: Buffer,
     pub(crate) coroutine: CoroutineImpl,
-    pub(crate) result: *mut Result<&'static [u8], Error>
+    pub(crate) result: *mut Result<Buffer, Error>
 }
 
 pub struct WriteTcpState {
@@ -72,7 +73,7 @@ pub enum State {
     ConnectTcp(Box<ConnectTcpState>),
     PollTcp(Box<PollTcpState>),
     ReadTcp(Box<ReadTcpState>),
-    /// Tells the selector that [`WriteTcpState`](crate::io::WriteTcpState) or another writable [`State`] is ready.
+    /// Tells the selector that [`WriteTcpState`](WriteTcpState) or another writable [`State`] is ready.
     /// So, this method returns before the write syscall is done. The writing will be done in [`Selector::poll`].
     ///
     /// # Panics
@@ -138,14 +139,12 @@ impl State {
     }
 
     #[inline(always)]
-    pub fn new_poll_tcp(stream: RawFd, coroutine: CoroutineImpl, result: *mut Result<&'_ [u8], Error>) -> Self {
-        let result = unsafe { std::mem::transmute(result) };
+    pub fn new_poll_tcp(stream: RawFd, coroutine: CoroutineImpl, result: *mut Result<Buffer, Error>) -> Self {
         State::PollTcp(Box::new(PollTcpState { fd: stream, coroutine, result }))
     }
 
     #[inline(always)]
-    pub fn new_read_tcp(stream: RawFd, buf: Buffer, coroutine: CoroutineImpl, result: *mut Result<&'_ [u8], Error>) -> Self {
-        let result = unsafe { std::mem::transmute(result) };
+    pub fn new_read_tcp(stream: RawFd, buf: Buffer, coroutine: CoroutineImpl, result: *mut Result<Buffer, Error>) -> Self {
         State::ReadTcp(Box::new(ReadTcpState { fd: stream, buffer: buf, coroutine, result }))
     }
 

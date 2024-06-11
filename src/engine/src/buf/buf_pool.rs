@@ -76,7 +76,7 @@ impl BufPool {
     /// # Safety
     /// - buf.cap() == self.buffer_len
     #[inline(always)]
-    pub fn put_unchecked(&mut self, mut buf: Buffer) {
+    pub unsafe fn put_unchecked(&mut self, mut buf: Buffer) {
         buf.clear();
         self.pool.push(buf);
     }

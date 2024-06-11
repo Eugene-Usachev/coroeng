@@ -90,9 +90,9 @@ impl TcpStream {
     }
 }
 
-impl AsyncRead<&'static [u8]> for TcpStream {
+impl AsyncRead<Buffer> for TcpStream {
     #[inline(always)]
-    fn read(&mut self, res: *mut Result<&'static [u8], Error>) -> YieldStatus {
+    fn read(&mut self, res: *mut Result<Buffer, Error>) -> YieldStatus {
         YieldStatus::tcp_read(self.state_ptr, res)
     }
 }

@@ -1,3 +1,4 @@
+// TODO update docs
 use std::io::Error;
 use crate::coroutine::YieldStatus;
 
@@ -5,14 +6,6 @@ use crate::coroutine::YieldStatus;
 pub trait AsyncRead<T> {
     /// Reads data from this reader. It will wait (non-blocking) until data is available or an error occurs.
     /// When a coroutine is woken up, returns a reference to a slice of read bytes or an error.
-    ///
-    /// # Where returns a reference to a slice of bytes
-    ///
-    /// The length of the slice is equal to the number of bytes read.
-    ///
-    /// ### Note
-    ///
-    /// Returning a reference to a slice of bytes allows application to avoid copying and allocations in usual cases.
     ///
     /// ### Warning
     ///
