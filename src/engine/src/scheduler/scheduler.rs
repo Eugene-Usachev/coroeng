@@ -9,7 +9,7 @@ use std::ptr::null_mut;
 use std::time::Instant;
 use proc::coro;
 use crate::coroutine::coroutine::{CoroutineImpl};
-use crate::coroutine::{end, yield_now, YieldStatus};
+use crate::coroutine::{yield_now, YieldStatus};
 use crate::io::sys::unix::{IoUringSelector};
 use crate::io::{Selector, State};
 use crate::net::{TcpListener};
@@ -25,6 +25,23 @@ thread_local! {
     ///
     /// This is thread-local, so it can be used without synchronization.
     pub static LOCAL_SCHEDULER: UnsafeCell<MaybeUninit<Scheduler>> = UnsafeCell::new(MaybeUninit::uninit());
+    /// Whether the current scheduler was closed.
+    pub static WAS_CLOSED: UnsafeCell<bool> = UnsafeCell::new(false);
+}
+
+/// Will lead to ending the scheduler.
+///
+/// # Be careful
+///
+/// It means, that [`uninit`](uninit) will be called.
+/// After this [`Selector`](Selector) will be dropped and all poll states will be leaked (with memory).
+///
+/// # Do not call this function in a production!
+/// Because it can lead to a memory leak and coroutine leak (that can cause a deadlock). It uses only for test and recommended to use it only for testing.
+pub fn end() {
+    WAS_CLOSED.with(|was_closed| unsafe {
+        *(&mut *was_closed.get()) = true;
+    });
 }
 
 /// The scheduler works with coroutines. Specifically, it:
@@ -100,18 +117,12 @@ impl Scheduler {
     }
 
     /// Wakes up the sleeping coroutines, which are ready to run.
-    ///
-    /// # Return
-    ///
-    /// Returns true if [`end`](YieldStatus::End) was handled.
-    pub(crate) fn awake_coroutines<S: Selector>(&mut self, selector: &mut S) -> bool {
+    pub(crate) fn awake_coroutines<S: Selector>(&mut self, selector: &mut S) {
         let now = Instant::now();
         loop {
             if let Some(sleeping_coroutine) = self.sleeping.pop_first() {
                 if now >= sleeping_coroutine.execution_time {
-                    if unlikely(self.handle_coroutine_state(selector, sleeping_coroutine.co)) {
-                        return true;
-                    }
+                    self.handle_coroutine_state(selector, sleeping_coroutine.co);
                 } else {
                     self.sleeping.insert(sleeping_coroutine);
                     break;
@@ -120,27 +131,17 @@ impl Scheduler {
                 break;
             }
         }
-
-        false
     }
 
     /// Resume the provided [`coroutine`](CoroutineImpl) and process the result.
-    ///
-    /// # Return
-    ///
-    /// Returns true if [`end`](YieldStatus::End) was handled.
     #[inline(always)]
-    pub(crate) fn handle_coroutine_state<S: Selector>(&mut self, selector: &mut S, mut task: CoroutineImpl) -> bool {
+    pub(crate) fn handle_coroutine_state<S: Selector>(&mut self, selector: &mut S, mut task: CoroutineImpl) {
         let res: CoroutineState<YieldStatus, ()> = task.as_mut().resume(());
         match res {
             CoroutineState::Yielded(status) => {
                 match status {
                     YieldStatus::Yield => {
                         self.task_queue.push_front(task);
-                    }
-
-                    YieldStatus::End => {
-                        return true;
                     }
 
                     YieldStatus::Sleep(dur) => {
@@ -165,7 +166,7 @@ impl Scheduler {
                             let (error, task) = unsafe { state_.unwrap_err_unchecked() };
                             write_err!(status.stream_ptr, error);
                             self.handle_coroutine_state(selector, task);
-                            return false;
+                            return;
                         }
 
                         selector.register(unsafe {Ptr::new(state_.unwrap_unchecked())});
@@ -210,8 +211,6 @@ impl Scheduler {
             }
             CoroutineState::Complete(_) => {}
         }
-
-        false
     }
 
     #[inline(always)]
@@ -263,13 +262,13 @@ impl Scheduler {
     fn background_work<S: Selector>(selector_ref: &'static mut S) {
         let scheduler = local_scheduler();
         loop {
-            //scheduler.process_ready_coroutines(selector_ref);
-            if unlikely(scheduler.awake_coroutines(selector_ref)) {
-                yield end();
+            if unlikely(WAS_CLOSED.with(|was_closed| unsafe { *was_closed.get() })) {
+                break;
             }
+           scheduler.awake_coroutines(selector_ref);
 
-            if unlikely(selector_ref.poll(scheduler).expect("Poll error")) {
-                yield end();
+            if unlikely(selector_ref.poll(scheduler).is_err()) {
+                panic!("Poll error");
             }
 
             yield yield_now();
@@ -283,15 +282,14 @@ impl Scheduler {
 
         self.sched(Self::background_work(selector_ref, null_mut()));
 
-        let mut task_;
-        let mut task;
-
         loop {
-            task_ = self.task_queue.pop_back();
-
-            task = unsafe { task_.unwrap_unchecked() };
-            if unlikely(self.handle_coroutine_state(&mut selector, task)) {
-                break;
+            match self.task_queue.pop_back() {
+                Some(task) => {
+                    self.handle_coroutine_state(&mut selector, task);
+                }
+                None => {
+                    break;
+                }
             }
         }
 

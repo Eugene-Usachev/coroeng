@@ -19,16 +19,3 @@ use crate::coroutine::YieldStatus;
 pub fn yield_now(_res: *mut ()) -> YieldStatus {
     YieldStatus::yield_now()
 }
-
-/// Returns [`YieldStatus::End`]. If yielded, the [`scheduler`](crate::scheduler::Scheduler) will be terminated.
-///
-/// # Be careful
-///
-/// It means, that [`uninit`](crate::run::uninit) will be called.
-/// After this [`Selector`](crate::io::selector::Selector) will be dropped and all poll states will be leaked (with memory).
-///
-/// # Do not call this function in a production!
-/// Because it can lead to a memory leak and coroutine leak (that can cause a deadlock). It uses only for test and recommended to use it only for testing.
-pub fn end(_res: *mut ()) -> YieldStatus {
-    YieldStatus::end()
-}

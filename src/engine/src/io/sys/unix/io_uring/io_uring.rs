@@ -19,7 +19,8 @@ macro_rules! handle_ret {
         if $ret < 0 {
             let err = Error::last_os_error();
             unsafe { $state.result.write(Err(err)); }
-            return $scheduler.handle_coroutine_state($selector, $state.coroutine);
+            $scheduler.handle_coroutine_state($selector, $state.coroutine);
+            return;
         }
     };
 }
@@ -27,7 +28,8 @@ macro_rules! handle_ret {
 macro_rules! handle_ret_without_result {
     ($ret: expr, $state: expr, $scheduler: expr, $selector: expr) => {
         if $ret < 0 {
-            return $scheduler.handle_coroutine_state($selector, $state.coroutine);
+            $scheduler.handle_coroutine_state($selector, $state.coroutine);
+            return;
         }
     };
 }
@@ -108,8 +110,7 @@ impl IoUringSelector {
     }
 
     #[inline(always)]
-    #[must_use]
-    fn handle_completion(&mut self, scheduler: &mut Scheduler, ret: i32, ptr: Ptr<State>) -> bool {
+    fn handle_completion(&mut self, scheduler: &mut Scheduler, ret: i32, ptr: Ptr<State>) {
         let state = unsafe { ptr.read() };
 
         match state {
@@ -139,7 +140,6 @@ impl IoUringSelector {
                 unsafe { ptr.write(State::new_read_tcp(state.fd, buffer(), state.coroutine, state.result)) };
 
                 self.register(ptr);
-                false
             }
             State::ReadTcp(mut state) => {
                 handle_ret!(ret, state, scheduler, self);
@@ -172,7 +172,6 @@ impl IoUringSelector {
                     unsafe { ptr.write(State::new_write_all_tcp(state.fd, state.buffer, state.coroutine, state.result)) };
 
                     self.register(ptr);
-                    false
                 }
             }
             State::CloseTcp(state) => {
@@ -186,7 +185,7 @@ impl IoUringSelector {
 
 impl Selector for IoUringSelector {
     #[inline(always)]
-    fn poll(&mut self, scheduler: &mut Scheduler) -> Result<bool, ()> {
+    fn poll(&mut self, scheduler: &mut Scheduler) -> Result<(), ()> {
         if self.submit().is_err() {
             return Err(())
         }
@@ -198,12 +197,10 @@ impl Selector for IoUringSelector {
         for cqe in &mut cq {
             let ret = cqe.result();
             let token = Ptr::from(cqe.user_data());
-            if unlikely(self.handle_completion(scheduler, ret, token)) {
-                return Ok(true);
-            }
+            self.handle_completion(scheduler, ret, token);
         }
 
-        Ok(false)
+        Ok(())
     }
 
     #[inline(always)]

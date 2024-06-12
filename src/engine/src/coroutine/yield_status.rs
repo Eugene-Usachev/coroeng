@@ -94,19 +94,6 @@ pub enum YieldStatus {
     /// The current coroutine will be woken up by the scheduler after all other coroutines.
     Yield,
 
-    /// [`End`] takes no arguments.
-    ///
-    /// If yielded, the [`scheduler`](crate::scheduler::Scheduler) will be terminated.
-    ///
-    /// # Be careful
-    ///
-    /// It means, that [`uninit`](crate::run::uninit) will be called.
-    /// After this [`Selector`](crate::io::selector::Selector) will be dropped and all poll states will be leaked (with memory).
-    ///
-    /// # Do not call this function in a production!
-    /// Because it may cause a memory leak and coroutine leak (which can lead to deadlocks). It is only intended for testing and should only be used for testing purposes.
-    End,
-
     /// [`Sleep`] takes the duration.
     ///
     /// # Arguments
@@ -172,11 +159,6 @@ impl YieldStatus {
     /// Create a YieldStatus variant [`Yield`](YieldStatus::Yield).
     pub fn yield_now() -> Self {
         YieldStatus::Yield
-    }
-
-    /// Create a YieldStatus variant [`End`](YieldStatus::End).
-    pub fn end() -> Self {
-        YieldStatus::End
     }
 
     /// Create a YieldStatus variant [`Sleep`](YieldStatus::Sleep).

@@ -633,7 +633,7 @@ pub fn test_local(macro_attr: TokenStream, item: TokenStream) -> TokenStream {
             #[#crate_name::coro(crate=#crate_name_str)]
             fn coroutine_creator_for_this_test_DO_NOT_CALL_YOUR_FUNCTIONS_AS_IT() {
                 #fn_block
-                yield #crate_name::coroutine::end();
+                #crate_name::scheduler::end();
             }
 
             let core_id = #crate_name::utils::get_core_ids().unwrap()[0];
