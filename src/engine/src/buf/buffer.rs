@@ -52,6 +52,7 @@ impl Buffer {
     /// Creates raw slice with given capacity. This code avoids checking zero capacity.
     ///
     /// # Safety
+    ///
     /// capacity > 0
     #[inline(always)]
     fn raw_slice(capacity: usize) -> NonNull<[u8]> {

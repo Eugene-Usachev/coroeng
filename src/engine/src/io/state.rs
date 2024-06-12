@@ -2,12 +2,32 @@
 
 use std::io::Error;
 use std::fmt::{Debug, Formatter};
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering::SeqCst;
 import_fd_for_os!();
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use crate::coroutine::coroutine::CoroutineImpl;
 use crate::net::tcp::TcpStream;
 use crate::buf::Buffer;
 use crate::import_fd_for_os;
+
+static DROPS: AtomicUsize = AtomicUsize::new(0);
+static CREATES: AtomicUsize = AtomicUsize::new(0);
+
+struct ControlDrops {}
+
+impl ControlDrops {
+    pub fn new() -> Self {
+        println!("CREATES: {}", CREATES.fetch_add(1, SeqCst));
+        Self {}
+    }
+}
+
+impl Drop for ControlDrops {
+    fn drop(&mut self) {
+        println!("DROPS: {}", DROPS.fetch_add(1, SeqCst));
+    }
+}
 
 pub struct EmptyState {
     fd: RawFd
@@ -16,6 +36,7 @@ pub struct EmptyState {
 pub struct AcceptTcpState {
     pub(crate) fd: RawFd,
     pub(crate) coroutine: CoroutineImpl,
+    c: ControlDrops,
     pub(crate) result: *mut Result<TcpStream, Error>
 }
 
@@ -23,6 +44,7 @@ pub struct ConnectTcpState {
     pub(crate) address: SockAddr,
     pub(crate) socket: Socket,
     pub(crate) coroutine: CoroutineImpl,
+    c: ControlDrops,
     pub(crate) result: *mut Result<TcpStream, Error>
 }
 
@@ -30,6 +52,7 @@ pub struct ConnectTcpState {
 pub struct PollTcpState {
     pub(crate) fd: RawFd,
     pub(crate) coroutine: CoroutineImpl,
+    c: ControlDrops,
     pub(crate) result: *mut Result<Buffer, Error>
 }
 
@@ -37,6 +60,7 @@ pub struct ReadTcpState {
     pub(crate) fd: RawFd,
     pub(crate) buffer: Buffer,
     pub(crate) coroutine: CoroutineImpl,
+    c: ControlDrops,
     pub(crate) result: *mut Result<Buffer, Error>
 }
 
@@ -44,6 +68,7 @@ pub struct WriteTcpState {
     pub(crate) fd: RawFd,
     pub(crate) buffer: Buffer,
     pub(crate) coroutine: CoroutineImpl,
+    c: ControlDrops,
     pub(crate) result: *mut Result<Option<Buffer>, Error>
 }
 
@@ -51,11 +76,13 @@ pub struct WriteAllTcpState {
     pub(crate) fd: RawFd,
     pub(crate) buffer: Buffer,
     pub(crate) coroutine: CoroutineImpl,
+    c: ControlDrops,
     pub(crate) result: *mut Result<(), Error>
 }
 
 pub struct CloseTcpState {
     pub(crate) fd: RawFd,
+    c: ControlDrops,
     pub(crate) coroutine: CoroutineImpl
 }
 
@@ -115,13 +142,18 @@ impl State {
         }
     }
 
+    #[inline(always)]
+    pub fn do_empty(&mut self, fd: RawFd) {
+        unsafe { (self as *mut State).write(State::new_empty(fd)); }
+    }
+
     pub fn new_empty(fd: RawFd) -> Self {
         State::Empty(EmptyState { fd })
     }
 
     #[inline(always)]
     pub fn new_accept_tcp(listener: RawFd, coroutine: CoroutineImpl, result: *mut Result<TcpStream, Error>) -> Self {
-        State::AcceptTcp(Box::new(AcceptTcpState { fd: listener, coroutine, result }))
+        State::AcceptTcp(Box::new(AcceptTcpState { fd: listener, coroutine, result, c: ControlDrops::new() }))
     }
 
     #[inline(always)]
@@ -134,33 +166,33 @@ impl State {
         }
 
         unsafe {
-            Ok(State::ConnectTcp(Box::new(ConnectTcpState { address, socket: socket_.unwrap_unchecked(), coroutine, result })))
+            Ok(State::ConnectTcp(Box::new(ConnectTcpState { address, socket: socket_.unwrap_unchecked(), coroutine, result, c: ControlDrops::new() })))
         }
     }
 
     #[inline(always)]
     pub fn new_poll_tcp(stream: RawFd, coroutine: CoroutineImpl, result: *mut Result<Buffer, Error>) -> Self {
-        State::PollTcp(Box::new(PollTcpState { fd: stream, coroutine, result }))
+        State::PollTcp(Box::new(PollTcpState { fd: stream, coroutine, result, c: ControlDrops::new() }))
     }
 
     #[inline(always)]
     pub fn new_read_tcp(stream: RawFd, buf: Buffer, coroutine: CoroutineImpl, result: *mut Result<Buffer, Error>) -> Self {
-        State::ReadTcp(Box::new(ReadTcpState { fd: stream, buffer: buf, coroutine, result }))
+        State::ReadTcp(Box::new(ReadTcpState { fd: stream, buffer: buf, coroutine, result, c: ControlDrops::new() }))
     }
 
     #[inline(always)]
     pub fn new_write_tcp(stream: RawFd, buf: Buffer, coroutine: CoroutineImpl, result: *mut Result<Option<Buffer>, Error>) -> Self {
-        State::WriteTcp(Box::new(WriteTcpState { fd: stream, buffer: buf, coroutine, result }))
+        State::WriteTcp(Box::new(WriteTcpState { fd: stream, buffer: buf, coroutine, result, c: ControlDrops::new() }))
     }
 
     #[inline(always)]
     pub fn new_write_all_tcp(stream: RawFd, buf: Buffer, coroutine: CoroutineImpl, result: *mut Result<(), Error>) -> Self {
-        State::WriteAllTcp(Box::new(WriteAllTcpState { fd: stream, buffer: buf, coroutine, result }))
+        State::WriteAllTcp(Box::new(WriteAllTcpState { fd: stream, buffer: buf, coroutine, result, c: ControlDrops::new() }))
     }
 
     #[inline(always)]
     pub fn new_close_tcp(stream: RawFd, coroutine: CoroutineImpl) -> Self {
-        State::CloseTcp(Box::new(CloseTcpState { fd: stream, coroutine }))
+        State::CloseTcp(Box::new(CloseTcpState { fd: stream, coroutine, c: ControlDrops::new() }))
     }
 }
 

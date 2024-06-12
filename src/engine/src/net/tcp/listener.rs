@@ -67,9 +67,9 @@ pub struct TcpListener {
 
 impl TcpListener {
     /// Creates a new TcpListener from an existing fd.
-    pub fn from_fd(fd: RawFd) -> Self {
+    pub fn from_state_ptr(state_ptr: Ptr<State>) -> Self {
         Self {
-            state_ptr: Ptr::new(State::new_empty(fd))
+            state_ptr
         }
     }
 
@@ -141,7 +141,6 @@ impl TcpListener {
 fn close_listener(state_ptr: Ptr<State>) -> CoroutineImpl {
     Box::pin(#[coroutine] static move || {
         yield TcpListener::close(state_ptr);
-        unsafe { state_ptr.deallocate(); }
     })
 }
 

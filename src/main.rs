@@ -29,9 +29,6 @@
 #![feature(gen_blocks)]
 #![feature(core_intrinsics)]
 
-use std::{ptr, thread};
-use std::collections::VecDeque;
-use std::intrinsics::unlikely;
 use std::io::{Error, Write};
 use std::net::ToSocketAddrs;
 use std::sync::atomic::AtomicUsize;

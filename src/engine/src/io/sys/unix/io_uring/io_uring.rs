@@ -4,6 +4,7 @@ use std::io::Error;
 use std::os::fd::{AsRawFd, IntoRawFd};
 use std::{mem, ptr};
 use std::intrinsics::unlikely;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use io_uring::{cqueue, IoUring, opcode, squeue, types};
 use io_uring::types::{SubmitArgs, Timespec};
 use crate::buf::buffer;
@@ -119,14 +120,14 @@ impl IoUringSelector {
                 handle_ret!(ret, state, scheduler, self);
 
                 let accepted_fd = ret;
-                write_ok!(state.result, TcpStream::new(accepted_fd));
+                write_ok!(state.result, TcpStream::new(scheduler.get_state_ptr_for_fd(accepted_fd)));
 
                 scheduler.handle_coroutine_state(self, state.coroutine)
             }
             State::ConnectTcp(state) => {
                 handle_ret!(ret, state, scheduler, self);
 
-                write_ok!(state.result, TcpStream::new(state.socket.into_raw_fd()));
+                write_ok!(state.result, TcpStream::new(scheduler.get_state_ptr_for_fd(state.socket.into_raw_fd())));
 
                 let res = scheduler.handle_coroutine_state(self, state.coroutine);
                 unsafe { ptr.drop_in_place() };
@@ -175,8 +176,8 @@ impl IoUringSelector {
                 }
             }
             State::CloseTcp(state) => {
+                scheduler.put_state(ptr);
                 handle_ret_without_result!(ret, state, scheduler, self);
-
                 scheduler.handle_coroutine_state(self, state.coroutine)
             }
         }

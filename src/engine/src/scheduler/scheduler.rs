@@ -4,6 +4,7 @@ use std::intrinsics::unlikely;
 use std::mem::{MaybeUninit, transmute};
 #[allow(unused_imports)] // compiler will complain if it's not used, but we need it for resume()
 use std::ops::{Coroutine, CoroutineState};
+use std::os::fd::RawFd;
 use std::ptr::null_mut;
 use std::time::Instant;
 use proc::coro;
@@ -43,6 +44,8 @@ pub struct Scheduler {
     task_queue: VecDeque<CoroutineImpl>,
     sleeping: BTreeSet<SleepingCoroutine>,
 
+    state_pool: Vec<Ptr<State>>,
+
     //blocking_pool: BlockingPool,
     //ready_coroutines: Vec<CoroutineImpl>
 }
@@ -53,6 +56,7 @@ impl Scheduler {
         let scheduler = Self {
             task_queue: VecDeque::with_capacity(8),
             sleeping: BTreeSet::new(),
+            state_pool: Vec::new()
 
             //blocking_pool: BlockingPool::new(),
             //ready_coroutines: Vec::with_capacity(8)
@@ -150,14 +154,14 @@ impl Scheduler {
 
                     YieldStatus::NewTcpListener(status) => {
                         let fd = TcpListener::get_fd(status.address);
-                        unsafe { status.listener_ptr.write(TcpListener::from_fd(fd)); }
+                        unsafe { status.listener_ptr.write(TcpListener::from_state_ptr(self.get_state_ptr_for_fd(fd))); }
 
                         self.handle_coroutine_state(selector, task);
                     }
 
                     YieldStatus::TcpConnect(status) => {
                         let state_ = State::new_connect_tcp(socket2::SockAddr::from(status.address), task, status.stream_ptr);
-                        if state_.is_err() {
+                        if unlikely(state_.is_err()) {
                             let (error, task) = unsafe { state_.unwrap_err_unchecked() };
                             write_err!(status.stream_ptr, error);
                             self.handle_coroutine_state(selector, task);
@@ -208,6 +212,24 @@ impl Scheduler {
         }
 
         false
+    }
+
+    #[inline(always)]
+    pub(crate) fn get_state_ptr_for_fd(&mut self, fd: RawFd) -> Ptr<State> {
+        match self.state_pool.pop() {
+            Some(ptr) => {
+                unsafe { ptr.as_mut().do_empty(fd) };
+                ptr
+            }
+            None => {
+                Ptr::new(State::new_empty(fd))
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub(crate) fn put_state(&mut self, state_ptr: Ptr<State>) {
+        self.state_pool.push(state_ptr);
     }
 
     // #[inline(always)]

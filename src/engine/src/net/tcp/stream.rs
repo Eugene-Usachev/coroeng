@@ -65,9 +65,9 @@ pub struct TcpStream {
 
 impl TcpStream {
     /// Create a new `TcpStream` from a raw file descriptor.
-    pub fn new(fd: RawFd) -> Self {
+    pub fn new(state_ptr: Ptr<State>) -> Self {
         Self {
-            state_ptr: Ptr::new(State::new_empty(fd))
+            state_ptr
         }
     }
 
@@ -84,6 +84,7 @@ impl TcpStream {
     pub fn state_ptr(&mut self) -> Ptr<State> {
         self.state_ptr
     }
+
     /// Closes the stream.
     fn close(state_ref: Ptr<State>) -> YieldStatus {
         YieldStatus::tcp_close(state_ref)
@@ -112,7 +113,6 @@ impl AsyncWrite<Buffer> for TcpStream {
 fn close_stream(state_ref: Ptr<State>) -> CoroutineImpl {
     Box::pin(#[coroutine] static move || {
         yield TcpStream::close(state_ref);
-        unsafe { state_ref.deallocate(); }
     })
 }
 

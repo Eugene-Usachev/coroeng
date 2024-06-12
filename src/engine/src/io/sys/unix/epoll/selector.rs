@@ -9,7 +9,7 @@ use nix::sys::socket::{accept4, recvfrom, SockFlag};
 use nix::unistd::write;
 use crate::io::selector::Selector;
 use crate::io::sys::unix::epoll::net::setup_connection;
-use crate::io::sys::unix::check_error::check_error;
+use crate::io::sys::unix::epoll::check_error::check_error;
 use crate::io::sys::unix::net;
 use crate::io::State;
 use crate::scheduler::Scheduler;
