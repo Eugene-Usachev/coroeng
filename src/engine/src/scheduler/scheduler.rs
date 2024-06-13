@@ -182,7 +182,7 @@ impl Scheduler {
                     YieldStatus::TcpRead(status) => {
                         let state_ptr = status.state_ref;
                         let state_ref = unsafe { state_ptr.as_ref() };
-                        unsafe { state_ptr.write(State::new_read_tcp(state_ref.fd(), buffer(), task, status.result_ptr)) };
+                        unsafe { state_ptr.write(State::new_poll_tcp(state_ref.fd(), task, status.result_ptr)) };
                         selector.register(state_ptr);
                     }
 

@@ -2,9 +2,7 @@ use std::collections::VecDeque;
 use std::cell::UnsafeCell;
 use std::io::Error;
 use std::os::fd::{AsRawFd, IntoRawFd};
-use std::{mem, ptr};
-use std::intrinsics::unlikely;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::{io, ptr};
 use io_uring::{cqueue, IoUring, opcode, squeue, types};
 use io_uring::types::{SubmitArgs, Timespec};
 use crate::buf::buffer;
@@ -19,15 +17,6 @@ macro_rules! handle_ret {
         if $ret < 0 {
             let err = Error::last_os_error();
             unsafe { $state.result.write(Err(err)); }
-            $scheduler.handle_coroutine_state($selector, $state.coroutine);
-            return;
-        }
-    };
-}
-
-macro_rules! handle_ret_without_result {
-    ($ret: expr, $state: expr, $scheduler: expr, $selector: expr) => {
-        if $ret < 0 {
             $scheduler.handle_coroutine_state($selector, $state.coroutine);
             return;
         }
@@ -57,7 +46,6 @@ pub(crate) struct IoUringSelector {
 
 impl IoUringSelector {
     pub fn new() -> Self {
-        println!("io_uring");
         Self {
             timeout: SubmitArgs::new().timespec(&TIMEOUT),
             ring: UnsafeCell::new(IoUring::new(1024).unwrap()),
@@ -176,7 +164,9 @@ impl IoUringSelector {
             }
             State::CloseTcp(state) => {
                 scheduler.put_state(ptr);
-                handle_ret_without_result!(ret, state, scheduler, self);
+                if ret < 0 {
+                    println!("close error: {:?}", Error::last_os_error())
+                }
                 scheduler.handle_coroutine_state(self, state.coroutine)
             }
         }
