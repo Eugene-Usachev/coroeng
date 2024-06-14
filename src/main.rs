@@ -33,12 +33,18 @@ use std::io::{Error, Write};
 use std::net::ToSocketAddrs;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::SeqCst;
-use std::time::Duration;
+use std::{net, ptr, thread};
+use std::collections::VecDeque;
+use std::intrinsics::unlikely;
+use std::pin::Pin;
+use std::time::{Duration, Instant};
+use io_uring::types::{SubmitArgs, Timespec};
 use engine::{coro, run_on_all_cores, run_on_core, spawn_local, wait};
 use engine::net::{TcpListener, TcpStream};
 use engine::sleep::sleep;
 use engine::buf::{Buffer, buffer, BufPool};
 use engine::io::{AsyncRead, AsyncWrite};
+use engine::scheduler::end;
 use engine::utils::{CoreId, get_core_ids, Ptr, set_for_current};
 
 fn docs() {
@@ -194,6 +200,94 @@ fn tcp_benchmark() {
     run_on_all_cores(start_server);
 }
 
+fn tcp_profile() {
+    #[coro]
+    fn handle_tcp_client(mut stream: TcpStream) {
+        loop {
+            let slice: Buffer = (yield stream.read()).unwrap();
+
+            if slice.is_empty() {
+                break;
+            }
+
+            let res: Result<(), Error> = yield TcpStream::write_all(&mut stream, slice);
+
+            if res.is_err() {
+                println!("write failed, reason: {}", res.err().unwrap());
+                break;
+            }
+        }
+    }
+
+    #[coro]
+    fn start_server() {
+        #[coro]
+        fn deadline() {
+            yield sleep(Duration::from_secs(60));
+            end();
+        }
+        spawn_local!(deadline());
+        let mut listener = yield TcpListener::new("localhost:8081".to_socket_addrs().unwrap().next().unwrap());
+        loop {
+            let stream_ = yield listener.accept();
+
+            if stream_.is_err() {
+                println!("accept failed, reason: {}", stream_.err().unwrap());
+                continue;
+            }
+
+            let stream: TcpStream = stream_.unwrap();
+            spawn_local!(handle_tcp_client(stream));
+        }
+    }
+
+    thread::spawn(|| {
+        use std::io::Read;
+        use std::io::Write;
+        use std::net;
+        use std::time::{Duration, Instant};
+
+        const PAR: usize = 64;
+        const N: usize = 2000;
+        const COUNT: usize = N / PAR;
+        const TRIES: usize = 25;
+        const ADDR_ENGINE: &str = "localhost:8081";
+
+        let mut res = 0;
+        thread::sleep(Duration::from_secs(2));
+        for i in 0..TRIES {
+            let start = Instant::now();
+            let mut joins = Vec::with_capacity(PAR);
+            for _i in 0..PAR {
+                joins.push(thread::spawn(move || {
+                    let mut conn = net::TcpStream::connect(ADDR_ENGINE).unwrap();
+                    let mut buf = [0u8; 1024];
+
+                    for _ in 0..COUNT {
+                        conn.write_all(b"ping").unwrap();
+                        let n = conn.read(&mut buf).unwrap();
+                    }
+                }));
+            }
+
+            for join in joins {
+                join.join().unwrap();
+            }
+
+            let rps = (N * 1000) / start.elapsed().as_millis() as usize;
+            println!("Benchmark took: {}ms, RPS: {rps}", start.elapsed().as_millis());
+
+            res += rps;
+
+            thread::sleep(Duration::from_millis(2000));
+        }
+
+        println!("Average RPS: {}", res / TRIES);
+    });
+
+    run_on_all_cores(start_server);
+}
+
 fn benchmark_sleep() {
     #[coro]
     fn spawn_sleep() {
@@ -233,8 +327,248 @@ fn leak_test() {
 fn main() {
     //run_on_core(leak_test, get_core_ids().unwrap()[0]);
     //docs();
-    //io_uring();
-    tcp_benchmark();
+    io_uring();
+    //tcp_profile();
+    //tcp_benchmark();
     //run_on_core(ping_pong, get_core_ids().unwrap()[0]);
     //std1();
+}
+
+fn io_uring() -> Result<(), Error> {
+    use std::os::unix::io::{AsRawFd, RawFd};
+    use io_uring::{opcode, squeue, cqueue, types, IoUring, SubmissionQueue};
+    println!("io_uring");
+
+    #[derive(Debug)]
+    enum Token {
+        Accept,
+        Poll {
+            fd: RawFd,
+        },
+        Read {
+            fd: RawFd,
+            buf: Buffer
+        },
+        Write {
+            fd: RawFd,
+            buf: Buffer,
+            offset: usize,
+            len: usize,
+        }
+    }
+
+    struct AcceptCount {
+        entry: squeue::Entry,
+        count: usize,
+    }
+
+    impl AcceptCount {
+        fn new(fd: RawFd, token: u64, count: usize) -> AcceptCount {
+            AcceptCount {
+                entry: opcode::Accept::new(types::Fd(fd), ptr::null_mut(), ptr::null_mut())
+                    .build()
+                    .user_data(token),
+                count
+            }
+        }
+
+        pub fn push_to(&mut self, sq: &mut SubmissionQueue<'_>) {
+            while self.count > 0 {
+                unsafe {
+                    match sq.push(&self.entry) {
+                        Ok(_) => self.count -= 1,
+                        Err(_) => break,
+                    }
+                }
+            }
+
+            sq.sync();
+        }
+    }
+
+    fn run(cpu: CoreId) -> Result<(), Error> {
+        BufPool::init_in_local_thread(4096);
+        set_for_current(cpu);
+        const CAP: usize = 512;
+        let mut ring: IoUring<squeue::Entry, cqueue::Entry> = IoUring::builder()
+            .build(CAP as u32)?;
+
+        let listener_fd = TcpListener::get_fd("engine:8081".to_socket_addrs().unwrap().next().unwrap());
+
+        let mut backlog = VecDeque::with_capacity(CAP);
+
+        let (submitter, mut sq, mut cq) = ring.split();
+        let token_id = Ptr::new(Token::Accept).as_u64();
+        let mut accept = AcceptCount::new(listener_fd.as_raw_fd(), token_id, 1);
+        accept.push_to(&mut sq);
+
+        loop {
+            accept.push_to(&mut sq);
+
+            // clean backlog
+            loop {
+                if sq.is_full() {
+                    match submitter.submit() {
+                        Ok(_) => (),
+                        Err(ref err) if err.raw_os_error() == Some(libc::EBUSY) => break,
+                        Err(err) => return Err(err.into()),
+                    }
+                }
+                sq.sync();
+
+                match backlog.pop_front() {
+                    Some(sqe) => unsafe {
+                        let _ = sq.push(&sqe);
+                    },
+                    None => break,
+                }
+            }
+
+            match submitter.submit_with_args(1, &SubmitArgs::new().timespec(&Timespec::new().nsec(500_000))) {
+                Ok(_) => (),
+                Err(ref err) if err.raw_os_error() == Some(libc::ETIME) => (),
+                Err(ref err) if err.raw_os_error() == Some(libc::EBUSY) => (),
+                Err(err) => return Err(err.into()),
+            }
+            cq.sync();
+
+            for cqe in &mut cq {
+                let ret = cqe.result();
+                let token_index = cqe.user_data();
+                let token = Ptr::from(token_index);
+
+                if ret < 0 {
+                    unsafe { token.drop_in_place() };
+                    eprintln!(
+                        "token {:?} error: {:?}",
+                        token,
+                        Error::from_raw_os_error(-ret)
+                    );
+                    continue;
+                }
+
+                match unsafe { token.read() } {
+                    Token::Accept => {
+                        accept.count += 1;
+
+                        let fd = ret;
+                        let poll_e = opcode::PollAdd::new(types::Fd(fd), libc::POLLIN as _)
+                            .build()
+                            .user_data(Ptr::new(Token::Poll { fd }).as_u64());
+
+                        unsafe {
+                            if sq.push(&poll_e).is_err() {
+                                backlog.push_back(poll_e);
+                            }
+                        }
+                    }
+
+                    Token::Poll { fd } => {
+                        let mut buf = buffer();
+                        let ptr = buf.as_mut_ptr();
+                        let cap = buf.cap();
+                        unsafe { token.write(Token::Read { fd, buf }) };
+                        let read_e = opcode::Recv::new(types::Fd(fd), ptr, cap as u32)
+                            .build()
+                            .user_data(token_index);
+
+                        unsafe {
+                            if sq.push(&read_e).is_err() {
+                                backlog.push_back(read_e);
+                            }
+                        }
+                    }
+
+                    Token::Read { fd, mut buf } => {
+                        if unlikely(ret == 0) {
+                            println!("fd: {} closed", fd);
+                            unsafe {token.drop_in_place()};
+                            unsafe {
+                                libc::close(fd);
+                            }
+                        } else {
+                            let len = ret as usize;
+                            let ptr = buf.as_mut_ptr();
+
+                            unsafe {
+                                token.write(Token::Write {
+                                    fd,
+                                    buf,
+                                    len,
+                                    offset: 0,
+                                });
+                            };
+
+                            let write_e = opcode::Send::new(types::Fd(fd), ptr, len as _)
+                                .build()
+                                .user_data(token_index);
+
+                            unsafe {
+                                if sq.push(&write_e).is_err() {
+                                    backlog.push_back(write_e);
+                                }
+                            }
+                        }
+                    }
+
+                    Token::Write {
+                        fd,
+                        mut buf,
+                        offset,
+                        len,
+                    } => {
+                        let write_len = ret as usize;
+
+                        let entry = if offset + write_len >= len {
+                            unsafe {
+                                token.write(Token::Poll { fd });
+                            }
+
+                            opcode::PollAdd::new(types::Fd(fd), libc::POLLIN as _)
+                                .build()
+                                .user_data(token_index)
+                        } else {
+                            let offset = offset + write_len;
+                            let len = len - offset;
+                            buf.set_offset(offset);
+                            let ptr = buf.as_mut_ptr();
+
+                            unsafe {
+                                token.write(Token::Write {
+                                    fd,
+                                    buf,
+                                    offset,
+                                    len,
+                                });
+                            }
+
+                            opcode::Write::new(types::Fd(fd), ptr, len as _)
+                                .build()
+                                .user_data(token_index)
+                        };
+
+                        unsafe {
+                            if sq.push(&entry).is_err() {
+                                backlog.push_back(entry);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let cores = get_core_ids().unwrap();
+
+    for i in 1..cores.len() {
+        let core = cores[i % cores.len()];
+        thread::spawn(move || {
+            run(core).expect("Failed to run");
+        });
+    }
+
+    let core = cores[0];
+    run(core)?;
+
+    Ok(())
 }

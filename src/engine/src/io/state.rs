@@ -57,7 +57,8 @@ pub struct WriteAllTcpState {
 
 pub struct CloseTcpState {
     pub(crate) fd: RawFd,
-    pub(crate) coroutine: CoroutineImpl
+    pub(crate) coroutine: CoroutineImpl,
+    pub(crate) result: *mut Result<(), Error>
 }
 
 
@@ -165,8 +166,8 @@ impl State {
     }
 
     #[inline(always)]
-    pub fn new_close_tcp(stream: RawFd, coroutine: CoroutineImpl) -> Self {
-        State::CloseTcp(Box::new(CloseTcpState { fd: stream, coroutine }))
+    pub fn new_close_tcp(stream: RawFd, coroutine: CoroutineImpl, result: *mut Result<(), Error>) -> Self {
+        State::CloseTcp(Box::new(CloseTcpState { fd: stream, coroutine, result }))
     }
 }
 

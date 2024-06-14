@@ -82,6 +82,9 @@ pub struct TcpWriteAll {
 pub struct TcpClose {
     /// The state ID associated with the TCP close operation.
     pub(crate) state_ptr: Ptr<State>,
+    /// Pointer to store the result of the TCP close operation.
+    /// If success, the result will contain `()`.
+    pub(crate) result_ptr: *mut Result<(), Error>,
 }
 
 /// The status of the coroutine yield. This is the one way to communicate with the scheduler.
@@ -151,7 +154,9 @@ pub enum YieldStatus {
     TcpWriteAll(TcpWriteAll),
 
     /// [`TcpClose`] takes the state id.
-    /// If yielded, the connection assigned to this state will be closed, and the state will be removed.
+    /// 
+    /// If yielded, the connection assigned to this state will be closed.
+    /// The close result will be stored in the result pointer.
     TcpClose(TcpClose)
 }
 
@@ -202,7 +207,7 @@ impl YieldStatus {
     }
 
     /// Create a YieldStatus variant [`TcpClose`](YieldStatus::TcpClose).
-    pub fn tcp_close(state_ref: Ptr<State>) -> Self {
-        YieldStatus::TcpClose(TcpClose { state_ptr: state_ref })
+    pub fn tcp_close(state_ref: Ptr<State>, result_ptr: *mut Result<(), Error>) -> Self {
+        YieldStatus::TcpClose(TcpClose { state_ptr: state_ref, result_ptr })
     }
 }

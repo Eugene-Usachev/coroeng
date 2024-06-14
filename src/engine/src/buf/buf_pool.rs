@@ -66,8 +66,7 @@ impl BufPool {
     /// Put [`Buffer`] to [`BufPool`].
     pub fn put(&mut self, mut buf: Buffer) {
         if likely(buf.real_cap() == self.buffer_len) {
-            buf.clear();
-            self.pool.push(buf);
+            unsafe { self.put_unchecked(buf); }
         }
     }
 

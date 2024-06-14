@@ -163,10 +163,9 @@ impl IoUringSelector {
                 }
             }
             State::CloseTcp(state) => {
-                scheduler.put_state(ptr);
-                if ret < 0 {
-                    println!("close error: {:?}", Error::last_os_error())
-                }
+                handle_ret!(ret, state, scheduler, self);
+                
+                write_ok!(state.result, ());
                 scheduler.handle_coroutine_state(self, state.coroutine)
             }
         }

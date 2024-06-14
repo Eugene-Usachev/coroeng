@@ -13,7 +13,10 @@ use crate::utils::Ptr;
 ///
 /// # Close
 ///
-/// [`TcpStream`] is automatically closed when it is dropped.
+/// If you want to close the stream, you can use the [`TcpStream::close`] method.
+/// Be careful, if the other side closes the stream, you need not call [`TcpStream::close`].
+/// 
+/// If [`TcpStream`] has been registered, you need call [`TcpStream::unregister`].
 ///
 /// # Examples
 ///
@@ -59,6 +62,7 @@ use crate::utils::Ptr;
 ///
 /// spawn_local!(connect_to_server());
 /// ```
+// TODO register/unregister
 pub struct TcpStream {
     state_ptr: Ptr<State>
 }
@@ -85,9 +89,10 @@ impl TcpStream {
         self.state_ptr
     }
 
+    // TODO docs
     /// Closes the stream.
-    fn close(state_ref: Ptr<State>) -> YieldStatus {
-        YieldStatus::tcp_close(state_ref)
+    pub fn close(state_ref: Ptr<State>, res: *mut Result<(), Error>) -> YieldStatus {
+        YieldStatus::tcp_close(state_ref, res)
     }
 }
 
@@ -110,15 +115,9 @@ impl AsyncWrite<Buffer> for TcpStream {
     }
 }
 
-fn close_stream(state_ref: Ptr<State>) -> CoroutineImpl {
-    Box::pin(#[coroutine] static move || {
-        yield TcpStream::close(state_ref);
-    })
-}
-
 impl Drop for TcpStream {
     fn drop(&mut self) {
         let state_ptr = self.state_ptr;
-        local_scheduler().sched(close_stream(state_ptr));
+        local_scheduler().put_state(state_ptr);
     }
 }

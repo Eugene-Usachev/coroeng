@@ -14,7 +14,6 @@ use crate::io::sys::unix::{IoUringSelector};
 use crate::io::{Selector, State};
 use crate::net::{TcpListener};
 use crate::{write_err};
-use crate::buf::buffer;
 use crate::run::uninit;
 use crate::sleep::SleepingCoroutine;
 use crate::utils::Ptr;
@@ -74,15 +73,11 @@ impl Scheduler {
             task_queue: VecDeque::with_capacity(8),
             sleeping: BTreeSet::new(),
             state_pool: Vec::new()
-
-            //blocking_pool: BlockingPool::new(),
-            //ready_coroutines: Vec::with_capacity(8)
         };
 
         LOCAL_SCHEDULER.with(|local| {
             unsafe {
                 *(&mut *local.get()) = MaybeUninit::new(scheduler);
-                //(&*local.get()).assume_init_ref().blocking_pool.run();
             };
         });
     }
@@ -204,7 +199,7 @@ impl Scheduler {
                     YieldStatus::TcpClose(status) => {
                         let state_ptr = status.state_ptr;
                         let state_ref = unsafe { state_ptr.as_mut() };
-                        unsafe { state_ptr.write(State::new_close_tcp(state_ref.fd(), task)) };
+                        unsafe { state_ptr.write(State::new_close_tcp(state_ref.fd(), task, status.result_ptr)) };
                         selector.register(state_ptr);
                     }
                 }
