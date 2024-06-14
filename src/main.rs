@@ -22,53 +22,71 @@
 // // // }
 // // //
 //
-#![allow(internal_features)]
 #![feature(coroutines)]
 #![feature(coroutine_trait)]
 #![feature(stmt_expr_attributes)]
 #![feature(gen_blocks)]
 #![feature(core_intrinsics)]
 
-use std::{ptr, thread};
+use std::{io, ptr, thread};
 use std::collections::VecDeque;
 use std::intrinsics::unlikely;
 use std::io::Error;
 use std::net::ToSocketAddrs;
+use std::os::unix::net::SocketAddr;
+use std::ptr::null_mut;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::SeqCst;
 use std::time::Duration;
 use io_uring::types::{SubmitArgs, Timespec};
-use engine::{coro, run_on_all_cores, spawn_local, wait};
+use engine::{coro, run_on_all_cores, run_on_core, spawn_local, wait};
 use engine::net::{TcpListener, TcpStream};
 use engine::sleep::sleep;
-use engine::buf::{Buffer, buffer, BufPool};
-use engine::io::{AsyncRead, AsyncWrite};
+use engine::buf::{buf_pool, Buffer, buffer, BufPool};
+use engine::io::{AsyncRead, AsyncWrite, PollState};
 use engine::utils::{CoreId, get_core_ids, Ptr, set_for_current};
 
 fn docs() {
-    use engine::{run_on_core, coro, wait};
-    use engine::sleep::sleep;
-    use engine::utils::get_core_ids;
-    use std::time::Duration;
+    #[coro]
+    fn difficult_write(mut stream: TcpStream, mut buf: Buffer) -> usize {
+        loop {
+            let res: Result<Option<Buffer>, Error> = yield stream.write(buf);
+            if res.is_err() {
+                println!("write failed, reason: {}", res.err().unwrap());
+                break;
+            }
+            if let Some(new_buf) = res.unwrap() {
+                buf = new_buf;
+            } else {
+                break;
+            }
+        }
+        42
+    }
 
     #[coro]
-    fn print_hello(name: String) {
-        let messages = ["Hello".to_string(), "world".to_string(), "from".to_string(), name, "coroutine!".to_string()];
-        for msg in messages.into_iter() {
-            println!("{}", msg);
-            yield sleep(Duration::from_millis(500));
+    fn handle_tcp_stream(stream: TcpStream) {
+        let res = wait!(difficult_write(stream, engine::buf::buffer()));
+        println!("{}", res);
+    }
+
+    #[coro]
+    fn start_server() {
+        let mut listener = yield TcpListener::new("engine:8081".to_socket_addrs().unwrap().next().unwrap());
+        loop {
+            let stream_ = yield listener.accept();
+
+            if stream_.is_err() {
+                println!("accept failed, reason: {}", stream_.err().unwrap());
+                continue;
+            }
+
+            let stream: TcpStream = stream_.unwrap();
+            spawn_local!(handle_tcp_stream(stream));
         }
     }
 
-    #[coro]
-    fn start_app() {
-        wait!(print_hello("start_app".to_string()));
-    }
-
-    fn main() {
-        let core = get_core_ids().unwrap()[0];
-        run_on_core(start_app, core);
-    }
+    run_on_all_cores(start_server);
 }
 
 #[coro]
@@ -76,7 +94,7 @@ fn ping_pong() {
     static C: AtomicUsize = AtomicUsize::new(0);
     #[coro]
     fn client() {
-        let stream_ = yield TcpStream::connect("engine:8082".to_socket_addrs().unwrap().next().unwrap());
+        let mut stream_ = yield TcpStream::connect("engine:8082".to_socket_addrs().unwrap().next().unwrap());
         if stream_.is_err() {
             println!("connect failed, reason: {}", stream_.err().unwrap());
             return;
@@ -155,7 +173,7 @@ fn ping_pong() {
     spawn_local!(server());
     yield sleep(Duration::from_secs(1));
 
-    for _i in 0..20000 {
+    for i in 0..20000 {
         spawn_local!(client());
     }
 }
@@ -224,10 +242,9 @@ fn benchmark_sleep() {
 }
 
 fn main() {
-    docs();
     //io_uring();
     //tcp_benchmark();
-    //run_on_core(ping_pong, get_core_ids().unwrap()[0]);
+    run_on_core(ping_pong, get_core_ids().unwrap()[0]);
 }
 
 // TODO r
