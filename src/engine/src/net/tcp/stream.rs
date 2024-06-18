@@ -2,6 +2,7 @@
 use std::io::Error;
 use std::net::SocketAddr;
 use std::os::fd::RawFd;
+use std::sync::atomic::AtomicUsize;
 use crate::coroutine::{CoroutineImpl, YieldStatus};
 use crate::io::{AsyncRead, AsyncWrite, State};
 use crate::{local_scheduler};
@@ -118,6 +119,6 @@ impl AsyncWrite<Buffer> for TcpStream {
 impl Drop for TcpStream {
     fn drop(&mut self) {
         let state_ptr = self.state_ptr;
-        local_scheduler().put_state(state_ptr);
+        local_scheduler().put_state_ptr(state_ptr);
     }
 }

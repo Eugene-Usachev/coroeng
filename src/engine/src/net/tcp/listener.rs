@@ -3,6 +3,7 @@ use std::io::Error;
 use std::net::{SocketAddr};
 use std::os::fd::{IntoRawFd, RawFd};
 use std::ptr::null_mut;
+use std::sync::atomic::AtomicUsize;
 use crate::coroutine::{CoroutineImpl, YieldStatus};
 use crate::io::sys::unix::net::get_tcp_listener_fd;
 use crate::net::tcp::TcpStream;
@@ -142,7 +143,7 @@ impl TcpListener {
 fn close_listener(state_ptr: Ptr<State>) -> CoroutineImpl {
     Box::pin(#[coroutine] static move || {
         yield TcpListener::close(state_ptr);
-        local_scheduler().put_state(state_ptr);
+        local_scheduler().put_state_ptr(state_ptr);
     })
 }
 

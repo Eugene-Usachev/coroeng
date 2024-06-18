@@ -6,12 +6,15 @@ use std::mem::{MaybeUninit, transmute};
 use std::ops::{Coroutine, CoroutineState};
 use std::os::fd::RawFd;
 use std::ptr::null_mut;
-use std::time::Instant;
+use std::sync::atomic::AtomicUsize;
+use std::thread;
+use std::time::{Duration, Instant};
+use socket2::{Domain, Protocol, Socket, Type};
 use proc::coro;
 use crate::coroutine::coroutine::{CoroutineImpl};
 use crate::coroutine::{yield_now, YieldStatus};
 use crate::io::sys::unix::{IoUringSelector};
-use crate::io::{Selector, State};
+use crate::io::{Selector, State, StateManager};
 use crate::net::{TcpListener};
 use crate::{write_err};
 use crate::run::uninit;
@@ -59,8 +62,8 @@ pub fn end() {
 pub struct Scheduler {
     task_queue: VecDeque<CoroutineImpl>,
     sleeping: BTreeSet<SleepingCoroutine>,
-
-    state_pool: Vec<Ptr<State>>,
+    
+    state_manager: StateManager
 
     //blocking_pool: BlockingPool,
     //ready_coroutines: Vec<CoroutineImpl>
@@ -72,7 +75,7 @@ impl Scheduler {
         let scheduler = Self {
             task_queue: VecDeque::with_capacity(8),
             sleeping: BTreeSet::new(),
-            state_pool: Vec::new()
+            state_manager: StateManager::new()
         };
 
         LOCAL_SCHEDULER.with(|local| {
@@ -89,6 +92,10 @@ impl Scheduler {
                 (&mut *local.get()).assume_init_drop();
             };
         });
+    }
+    
+    pub fn state_manager(&mut self) -> &mut StateManager {
+        &mut self.state_manager
     }
 
     /// Stores the [`coroutine`](CoroutineImpl) in the [`Scheduler`] to wake it up later.
@@ -150,34 +157,35 @@ impl Scheduler {
 
                     YieldStatus::NewTcpListener(status) => {
                         let fd = TcpListener::get_fd(status.address);
-                        unsafe { status.listener_ptr.write(TcpListener::from_state_ptr(self.get_state_ptr_for_fd(fd))); }
+                        let state = self.get_state_ptr();
+                        unsafe { state.as_mut() }.do_empty(fd, self.state_manager());
+                        unsafe { status.listener_ptr.write(TcpListener::from_state_ptr(state)); }
 
                         self.handle_coroutine_state(selector, task);
                     }
 
+                    YieldStatus::TcpAccept(status) => {
+                        let state_ptr = status.state_ptr;
+                        unsafe { state_ptr.write(self.state_manager.accept_tcp(state_ptr.as_ref().fd(), task, status.result_ptr)) };
+                        selector.register(state_ptr);
+                    }
+
                     YieldStatus::TcpConnect(status) => {
-                        let state_ = State::new_connect_tcp(socket2::SockAddr::from(status.address), task, status.stream_ptr);
-                        if unlikely(state_.is_err()) {
-                            let (error, task) = unsafe { state_.unwrap_err_unchecked() };
-                            write_err!(status.stream_ptr, error);
+                        let socket_ = Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP));
+                        if socket_.is_err() {
+                            write_err!(status.stream_ptr, socket_.unwrap_err_unchecked());
                             self.handle_coroutine_state(selector, task);
                             return;
                         }
-
-                        selector.register(unsafe {Ptr::new(state_.unwrap_unchecked())});
-                    }
-
-                    YieldStatus::TcpAccept(status) => {
-                        let state_ptr = status.state_ref;
-                        let state_ref = unsafe { state_ptr.as_ref() };
-                        unsafe { state_ptr.write(State::new_accept_tcp(state_ref.fd(), task, status.result_ptr)) };
-                        selector.register(state_ptr);
+                        let state_ = self.state_manager.connect_tcp(socket2::SockAddr::from(status.address), 
+                                                                    unsafe { socket_.unwrap_unchecked() }, task, status.stream_ptr);
+                        selector.register(Ptr::new(state_));
                     }
 
                     YieldStatus::TcpRead(status) => {
                         let state_ptr = status.state_ref;
                         let state_ref = unsafe { state_ptr.as_ref() };
-                        unsafe { state_ptr.write(State::new_poll_tcp(state_ref.fd(), task, status.result_ptr)) };
+                        unsafe { state_ptr.write(self.state_manager.poll_tcp(state_ref.fd(), task, status.result_ptr)) };
                         selector.register(state_ptr);
                     }
 
@@ -185,21 +193,21 @@ impl Scheduler {
                         let state_ptr = status.state_ref;
                         let state_ref = unsafe { state_ptr.as_ref() };
                         let fd = state_ref.fd();
-                        unsafe { state_ptr.write(State::new_write_tcp(fd, status.buffer, task, status.result_ptr)) };
+                        unsafe { state_ptr.write(self.state_manager.write_tcp(fd, status.buffer, task, status.result_ptr)) };
                         selector.register(state_ptr);
                     }
 
                     YieldStatus::TcpWriteAll(status) => {
                         let state_ptr = status.state_ref;
                         let state_ref = unsafe { state_ptr.as_ref() };
-                        unsafe { state_ptr.write(State::new_write_all_tcp(state_ref.fd(), status.buffer, task, status.result_ptr)) };
+                        unsafe { state_ptr.write(self.state_manager.write_all_tcp(state_ref.fd(), status.buffer, task, status.result_ptr)) };
                         selector.register(state_ptr);
                     }
 
                     YieldStatus::TcpClose(status) => {
                         let state_ptr = status.state_ptr;
                         let state_ref = unsafe { state_ptr.as_mut() };
-                        unsafe { state_ptr.write(State::new_close_tcp(state_ref.fd(), task, status.result_ptr)) };
+                        unsafe { state_ptr.write(self.state_manager.close_tcp(state_ref.fd(), task, status.result_ptr)) };
                         selector.register(state_ptr);
                     }
                 }
@@ -207,36 +215,21 @@ impl Scheduler {
             CoroutineState::Complete(_) => {}
         }
     }
-
+    
     #[inline(always)]
-    pub(crate) fn get_state_ptr_for_fd(&mut self, fd: RawFd) -> Ptr<State> {
-        match self.state_pool.pop() {
-            Some(ptr) => {
-                unsafe { ptr.as_mut().do_empty(fd) };
-                ptr
-            }
-            None => {
-                Ptr::new(State::new_empty(fd))
-            }
-        }
+    pub fn get_state_ptr(&mut self) -> Ptr<State> {
+        self.state_manager.get_state_ptr()
+    }
+    
+    #[inline(always)]
+    pub fn put_state_ptr(&mut self, state_ptr: Ptr<State>) {
+        self.state_manager.put_state_ptr(state_ptr);
     }
 
     #[inline(always)]
-    pub(crate) fn put_state(&mut self, state_ptr: Ptr<State>) {
-        self.state_pool.push(state_ptr);
+    pub(crate) fn put_state(&mut self, state_ptr: State) {
+        self.state_manager.put_state(state_ptr);
     }
-
-    // #[inline(always)]
-    // fn process_ready_coroutines<S: Selector>(&mut self, selector: &mut S) {
-    //     //self.blocking_pool.get_ready(&mut self.ready_coroutines);
-    //     let ptr = self.ready_coroutines.as_ptr();
-    //     unsafe {
-    //         for i in 0. .self.ready_coroutines.len() {
-    //             self.handle_coroutine_state(selector, ptr.add(i).read());
-    //         }
-    //         self.ready_coroutines.set_len(0);
-    //     }
-    // }
 
     /// Start the [`Scheduler`] and create [`Selector`].
     pub fn run(&mut self, main_func: CoroutineImpl) {
@@ -276,7 +269,6 @@ impl Scheduler {
         let selector_ref = unsafe { transmute::<&mut S, &'static mut S>(&mut selector) };
 
         self.sched(Self::background_work(selector_ref, null_mut()));
-
         loop {
             match self.task_queue.pop_back() {
                 Some(task) => {

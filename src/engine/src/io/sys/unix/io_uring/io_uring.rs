@@ -12,13 +12,20 @@ use crate::scheduler::Scheduler;
 use crate::utils::{Ptr};
 use crate::{write_ok};
 
-macro_rules! handle_ret {
-    ($ret: expr, $state: expr, $scheduler: expr, $selector: expr) => {
-        if $ret < 0 {
-            let err = Error::last_os_error();
-            unsafe { $state.result.write(Err(err)); }
-            $scheduler.handle_coroutine_state($selector, $state.coroutine);
-            return;
+macro_rules! handle_ret_and_get_state {
+    ($ret: expr, $state: expr, $state_ptr: expr, $scheduler: expr, $selector: expr) => {
+        {
+            let read_state = unsafe { $state_ptr.read() };
+            $scheduler.put_state($state);
+            
+            if $ret < 0 {
+                let err = Error::last_os_error();
+                unsafe { read_state.result.write(Err(err)); }
+                $scheduler.handle_coroutine_state($selector, read_state.coroutine);
+                return;
+            }
+            
+            read_state
         }
     };
 }
@@ -68,7 +75,7 @@ impl IoUringSelector {
         let ring = unsafe { &mut *self.ring.get() };
         let mut sq = unsafe { ring.submission_shared() };
         let submitter = ring.submitter();
-
+        
         loop {
             if sq.is_full() {
                 match submitter.submit() {
@@ -105,40 +112,48 @@ impl IoUringSelector {
             State::Empty(_) => {
                 panic!("[BUG] tried to handle an empty state in [`IoUringSelector`]. Please report this issue.")
             }
-            State::AcceptTcp(state) => {
-                handle_ret!(ret, state, scheduler, self);
+            
+            State::AcceptTcp(access_state_ptr) => {
+                let state = handle_ret_and_get_state!(ret, state, access_state_ptr, scheduler, self);
+                //let state_ptr = scheduler.get_state_ptr();
+                //unsafe { state_ptr.as_mut().do_empty(ret, scheduler.state_manager()) };
+                let state_ptr = Ptr::new(scheduler.state_manager().empty(ret));
+                write_ok!(state.result, TcpStream::new(state_ptr));
 
-                let accepted_fd = ret;
-                write_ok!(state.result, TcpStream::new(scheduler.get_state_ptr_for_fd(accepted_fd)));
-
-                scheduler.handle_coroutine_state(self, state.coroutine)
+                scheduler.handle_coroutine_state(self, state.coroutine);
             }
-            State::ConnectTcp(state) => {
-                handle_ret!(ret, state, scheduler, self);
+            
+            State::ConnectTcp(connect_tcp_state_ptr) => {
+                let state = handle_ret_and_get_state!(ret, state, connect_tcp_state_ptr, scheduler, self);
 
-                write_ok!(state.result, TcpStream::new(scheduler.get_state_ptr_for_fd(state.socket.into_raw_fd())));
+                let new_state_ptr = scheduler.get_state_ptr();
+                unsafe { new_state_ptr.as_mut().do_empty(state.socket.into_raw_fd(), scheduler.state_manager()) };
+                
+                write_ok!(state.result, TcpStream::new(new_state_ptr));
 
-                let res = scheduler.handle_coroutine_state(self, state.coroutine);
-                unsafe { ptr.drop_in_place() };
-                res
+                scheduler.handle_coroutine_state(self, state.coroutine);
+                unsafe { ptr.drop_and_deallocate() };
             }
-            State::PollTcp(state) => {
-                handle_ret!(ret, state, scheduler, self);
+            
+            State::PollTcp(poll_tcp_state_ptr) => {
+                let state = handle_ret_and_get_state!(ret, state, poll_tcp_state_ptr, scheduler, self);
 
-                unsafe { ptr.write(State::new_read_tcp(state.fd, buffer(), state.coroutine, state.result)) };
+                unsafe { ptr.write(scheduler.state_manager().read_tcp(state.fd, buffer(), state.coroutine, state.result)) };
 
                 self.register(ptr);
             }
-            State::ReadTcp(mut state) => {
-                handle_ret!(ret, state, scheduler, self);
+            
+            State::ReadTcp(read_tcp_state_ptr) => {
+                let mut state = handle_ret_and_get_state!(ret, state, read_tcp_state_ptr, scheduler, self);
 
                 state.buffer.add_written(ret as usize);
                 write_ok!(state.result, state.buffer);
 
                 scheduler.handle_coroutine_state(self, state.coroutine)
             }
-            State::WriteTcp(mut state) => {
-                handle_ret!(ret, state, scheduler, self);
+            
+            State::WriteTcp(write_tcp_state_ptr) => {
+                let mut state = handle_ret_and_get_state!(ret, state, write_tcp_state_ptr, scheduler, self);
 
                 if ret as usize == state.buffer.len() {
                     write_ok!(state.result, None);
@@ -149,21 +164,23 @@ impl IoUringSelector {
 
                 scheduler.handle_coroutine_state(self, state.coroutine)
             }
-            State::WriteAllTcp(mut state) => {
-                handle_ret!(ret, state, scheduler, self);
+            
+            State::WriteAllTcp(write_all_tcp_state_ptr) => {
+                let mut state = handle_ret_and_get_state!(ret, state, write_all_tcp_state_ptr, scheduler, self);
 
                 if ret as usize == state.buffer.len() {
                     write_ok!(state.result, ());
                     scheduler.handle_coroutine_state(self, state.coroutine)
                 } else {
                     state.buffer.set_offset(state.buffer.offset() + ret as usize);
-                    unsafe { ptr.write(State::new_write_all_tcp(state.fd, state.buffer, state.coroutine, state.result)) };
+                    unsafe { ptr.write(scheduler.state_manager().write_all_tcp(state.fd, state.buffer, state.coroutine, state.result)) };
 
                     self.register(ptr);
                 }
             }
-            State::CloseTcp(state) => {
-                handle_ret!(ret, state, scheduler, self);
+            
+            State::CloseTcp(close_tcp_state_ptr) => {
+                let state = handle_ret_and_get_state!(ret, state, close_tcp_state_ptr, scheduler, self);
                 
                 write_ok!(state.result, ());
                 scheduler.handle_coroutine_state(self, state.coroutine)
@@ -198,31 +215,37 @@ impl Selector for IoUringSelector {
 
         let mut entry = match state {
             State::Empty(_) => { panic!("[BUG] tried to register an empty state in [`IoUringSelector`]. Please report this issue.") }
-            State::AcceptTcp(state) => {
-                opcode::Accept::new(types::Fd(state.fd), ptr::null_mut(), ptr::null_mut())
+            State::AcceptTcp(state_ptr) => unsafe {
+                opcode::Accept::new(types::Fd(state_ptr.as_ref().fd), ptr::null_mut(), ptr::null_mut())
                     .build()
             }
-            State::ConnectTcp(state) => {
+            State::ConnectTcp(state_ptr) => unsafe {
+                let state = state_ptr.as_ref();
                 opcode::Connect::new(types::Fd(state.socket.as_raw_fd()), state.address.as_ptr(), state.address.len())
                     .build()
             }
-            State::PollTcp(state) => {
+            State::PollTcp(state_ptr) => unsafe {
+                let state = state_ptr.as_ref();
                 opcode::PollAdd::new(types::Fd(state.fd), libc::POLLIN as _)
                     .build()
             }
-            State::ReadTcp(state) => {
+            State::ReadTcp(state_ptr) => unsafe {
+                let state = state_ptr.as_mut();
                 opcode::Recv::new(types::Fd(state.fd), state.buffer.as_mut_ptr(), state.buffer.cap() as _)
                     .build()
             }
-            State::WriteTcp(state) => {
+            State::WriteTcp(state_ptr) => unsafe {
+                let state = state_ptr.as_ref();
                 opcode::Send::new(types::Fd(state.fd), state.buffer.as_ptr(), state.buffer.len() as _)
                     .build()
             }
-            State::WriteAllTcp(state) => {
+            State::WriteAllTcp(state_ptr) => unsafe {
+                let state = state_ptr.as_ref();
                 opcode::Send::new(types::Fd(state.fd), state.buffer.as_ptr(), state.buffer.len() as _)
                     .build()
             }
-            State::CloseTcp(state) => {
+            State::CloseTcp(state_ptr) => unsafe {
+                let state = state_ptr.as_ref();
                 opcode::Close::new(types::Fixed(state.fd as u32))
                     .build()
             }

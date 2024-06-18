@@ -37,7 +37,7 @@ pub struct TcpConnect {
 #[derive(Debug)]
 pub struct TcpAccept {
     /// The state ID associated with the TCP accept operation.
-    pub(crate) state_ref: Ptr<State>,
+    pub(crate) state_ptr: Ptr<State>,
     /// Pointer to store the result of the TCP accept operation.
     /// If success, the result will contain a [`TcpStream`].
     pub(crate) result_ptr: *mut Result<TcpStream, Error>,
@@ -187,8 +187,8 @@ impl YieldStatus {
     }
 
     /// Create a YieldStatus variant [`TcpAccept`](YieldStatus::TcpAccept).
-    pub fn tcp_accept(state_ref: Ptr<State>, result_ptr: *mut Result<TcpStream, Error>) -> Self {
-        YieldStatus::TcpAccept(TcpAccept { state_ref, result_ptr })
+    pub fn tcp_accept(state_ptr: Ptr<State>, result_ptr: *mut Result<TcpStream, Error>) -> Self {
+        YieldStatus::TcpAccept(TcpAccept { state_ptr, result_ptr })
     }
 
     /// Create a YieldStatus variant [`TcpRead`](YieldStatus::TcpRead).

@@ -71,18 +71,14 @@ impl<T> Ptr<T> {
         self.ptr as u64
     }
 
-    /// Drop the value.
-    #[inline(always)]
+    /// Drop the value by calling the destructor, but not deallocate memory.
+    /// To deallocate memory, use [`Ptr::deallocate`](#method.deallocate).
     pub unsafe fn drop_in_place(self) {
         if self.ptr.is_null() {
             return;
         }
-
         unsafe {
-            if std::mem::needs_drop::<T>() {
-               drop(self.read());
-            }
-            dealloc(self.ptr as *mut u8, Layout::new::<T>());
+            ptr::drop_in_place(self.ptr);
         }
     }
 
@@ -94,6 +90,19 @@ impl<T> Ptr<T> {
         }
 
         unsafe {
+            dealloc(self.ptr as *mut u8, Layout::new::<T>());
+        }
+    }
+
+    /// Drop the value by calling the destructor and then deallocate.
+    #[inline(always)]
+    pub unsafe fn drop_and_deallocate(self) {
+        if self.ptr.is_null() {
+            return;
+        }
+
+        unsafe {
+            ptr::drop_in_place(self.ptr);
             dealloc(self.ptr as *mut u8, Layout::new::<T>());
         }
     }
@@ -144,8 +153,11 @@ impl<T> Ptr<T> {
         if self.ptr.is_null() {
             panic!("ptr is null");
         }
-
-        unsafe { ptr::replace(self.ptr, value) };
+        
+        unsafe {
+            ptr::drop_in_place(self.ptr);
+            ptr::write(self.ptr, value);
+        }
     }
 }
 
@@ -212,7 +224,7 @@ mod tests {
         let ptr = Ptr::new(value);
         unsafe {
             assert_eq!(*ptr.as_ref(), value);
-            ptr.drop_in_place();
+            ptr.deallocate();
         }
     }
 
@@ -220,10 +232,6 @@ mod tests {
     fn test_null() {
         let ptr: Ptr<i32> = Ptr::null();
         assert!(ptr.is_null());
-
-        unsafe {
-            ptr.drop_in_place();
-        }
     }
 
     #[test]
@@ -233,7 +241,7 @@ mod tests {
         let raw_ptr = ptr.as_ptr();
         unsafe {
             assert_eq!(*raw_ptr, value);
-            ptr.drop_in_place();
+            ptr.deallocate();
         }
     }
 
@@ -244,7 +252,7 @@ mod tests {
         unsafe {
             let value_ref = ptr.as_ref();
             assert_eq!(*value_ref, value);
-            ptr.drop_in_place();
+            ptr.deallocate();
         }
     }
 
@@ -256,7 +264,7 @@ mod tests {
             let value_mut = ptr.as_mut();
             *value_mut = 50;
             assert_eq!(*ptr.as_ref(), 50);
-            ptr.drop_in_place();
+            ptr.deallocate();
         }
     }
 
@@ -286,7 +294,7 @@ mod tests {
         let converted_ptr: Ptr<i32> = Ptr::from(raw_u64);
         unsafe {
             assert_eq!(*converted_ptr.as_ref(), value);
-            ptr.drop_in_place();
+            ptr.deallocate();
         }
     }
 
@@ -301,12 +309,22 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "dropped")]
+    fn test_drop_and_deallocate() {
+        let value = MustDrop { counter: 5 };
+        let ptr = Ptr::new(value);
+        unsafe {
+            ptr.drop_and_deallocate();
+        }
+    }
+
+    #[test]
     fn test_read() {
         let value = 70;
         let ptr = Ptr::new(value);
         unsafe {
             assert_eq!(ptr.read(), value);
-            ptr.drop_in_place();
+            ptr.deallocate();
         }
     }
 
@@ -317,7 +335,7 @@ mod tests {
         unsafe {
             ptr.write(90);
             assert_eq!(*ptr.as_ref(), 90);
-            ptr.drop_in_place();
+            ptr.deallocate();
         }
     }
 
@@ -338,7 +356,7 @@ mod tests {
         let cloned_ptr = ptr.clone();
         unsafe {
             assert_eq!(*cloned_ptr.as_ref(), value);
-            ptr.drop_in_place();
+            ptr.deallocate();
         }
     }
 
@@ -350,7 +368,7 @@ mod tests {
         assert_eq!(debug_str, "130");
 
         unsafe {
-            ptr.drop_in_place();
+            ptr.deallocate();
         }
     }
 }

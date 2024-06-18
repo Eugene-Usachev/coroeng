@@ -29,17 +29,16 @@
 #![feature(gen_blocks)]
 #![feature(core_intrinsics)]
 
-use std::io::{Error, Write};
-use std::net::ToSocketAddrs;
+use std::io::{Error};
+use std::net::{Shutdown, ToSocketAddrs};
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::SeqCst;
-use std::{net, ptr, thread};
+use std::{ptr, thread};
 use std::collections::VecDeque;
 use std::intrinsics::unlikely;
-use std::pin::Pin;
-use std::time::{Duration, Instant};
+use std::time::{Duration};
 use io_uring::types::{SubmitArgs, Timespec};
-use engine::{coro, run_on_all_cores, run_on_core, spawn_local, wait};
+use engine::{coro, run_on_all_cores, spawn_local, wait};
 use engine::net::{TcpListener, TcpStream};
 use engine::sleep::sleep;
 use engine::buf::{Buffer, buffer, BufPool};
@@ -47,6 +46,7 @@ use engine::io::{AsyncRead, AsyncWrite};
 use engine::scheduler::end;
 use engine::utils::{CoreId, get_core_ids, Ptr, set_for_current};
 
+#[allow(dead_code)]
 fn docs() {
     use engine::{run_on_core, coro, wait};
     use engine::sleep::sleep;
@@ -167,11 +167,10 @@ fn tcp_benchmark() {
     fn handle_tcp_client(mut stream: TcpStream) {
         loop {
             let slice: Buffer = (yield stream.read()).unwrap();
-
+            
             if slice.is_empty() {
                 break;
             }
-
             let res: Result<(), Error> = yield TcpStream::write_all(&mut stream, slice);
 
             if res.is_err() {
@@ -183,7 +182,7 @@ fn tcp_benchmark() {
 
     #[coro]
     fn start_server() {
-        let mut listener = yield TcpListener::new("engine:8081".to_socket_addrs().unwrap().next().unwrap());
+        let mut listener: TcpListener = yield TcpListener::new("engine:8081".to_socket_addrs().unwrap().next().unwrap());
         loop {
             let stream_ = yield listener.accept();
 
@@ -214,11 +213,10 @@ fn tcp_profile() {
 
             if res.is_err() {
                 println!("write failed, reason: {}", res.err().unwrap());
-                break;
             }
         }
     }
-
+    
     #[coro]
     fn start_server() {
         #[coro]
@@ -226,13 +224,14 @@ fn tcp_profile() {
             yield sleep(Duration::from_secs(60));
             end();
         }
+        
         spawn_local!(deadline());
         let mut listener = yield TcpListener::new("localhost:8081".to_socket_addrs().unwrap().next().unwrap());
         loop {
             let stream_ = yield listener.accept();
 
             if stream_.is_err() {
-                println!("accept failed, reason: {}", stream_.err().unwrap());
+                //println!("accept failed, reason: {}", stream_.err().unwrap());
                 continue;
             }
 
@@ -247,31 +246,34 @@ fn tcp_profile() {
         use std::net;
         use std::time::{Duration, Instant};
 
-        const PAR: usize = 64;
-        const N: usize = 2000;
+        const PAR: usize = 128;
+        const N: usize = 2000000;
         const COUNT: usize = N / PAR;
-        const TRIES: usize = 25;
+        const TRIES: usize = 100;
         const ADDR_ENGINE: &str = "localhost:8081";
 
         let mut res = 0;
-        thread::sleep(Duration::from_secs(2));
+        thread::sleep(Duration::from_millis(2000));
         for i in 0..TRIES {
             let start = Instant::now();
             let mut joins = Vec::with_capacity(PAR);
             for _i in 0..PAR {
                 joins.push(thread::spawn(move || {
-                    let mut conn = net::TcpStream::connect(ADDR_ENGINE).unwrap();
-                    let mut buf = [0u8; 1024];
+                    if let Ok(mut conn) = net::TcpStream::connect(ADDR_ENGINE){
+                        let mut buf = [0u8; 1024];
 
-                    for _ in 0..COUNT {
-                        conn.write_all(b"ping").unwrap();
-                        let n = conn.read(&mut buf).unwrap();
+                        for _ in 0..COUNT {
+                            let _ = conn.write_all(b"ping");
+                            let _ = conn.read(&mut buf).expect("read failed");
+                        }
+                    } else {
+                        panic!("connect failed, reason: {}", net::TcpStream::connect(ADDR_ENGINE).err().unwrap());
                     }
                 }));
             }
 
             for join in joins {
-                join.join().unwrap();
+                let _ = join.join();
             }
 
             let rps = (N * 1000) / start.elapsed().as_millis() as usize;
@@ -327,9 +329,9 @@ fn leak_test() {
 fn main() {
     //run_on_core(leak_test, get_core_ids().unwrap()[0]);
     //docs();
-    io_uring();
+    //io_uring();
     //tcp_profile();
-    //tcp_benchmark();
+    tcp_benchmark();
     //run_on_core(ping_pong, get_core_ids().unwrap()[0]);
     //std1();
 }
@@ -438,7 +440,7 @@ fn io_uring() -> Result<(), Error> {
                 let token = Ptr::from(token_index);
 
                 if ret < 0 {
-                    unsafe { token.drop_in_place() };
+                    unsafe { token.drop_and_deallocate() };
                     eprintln!(
                         "token {:?} error: {:?}",
                         token,
@@ -482,7 +484,7 @@ fn io_uring() -> Result<(), Error> {
                     Token::Read { fd, mut buf } => {
                         if unlikely(ret == 0) {
                             println!("fd: {} closed", fd);
-                            unsafe {token.drop_in_place()};
+                            unsafe {token.drop_and_deallocate()};
                             unsafe {
                                 libc::close(fd);
                             }

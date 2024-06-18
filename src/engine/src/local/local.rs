@@ -105,8 +105,8 @@ impl<T> Drop for Local<T> {
     fn drop(&mut self) {
         if self.dec_counter() == 0 {
             unsafe {
-                self.data.drop_in_place();
-                self.counter.drop_in_place();
+                self.data.drop_and_deallocate();
+                self.counter.drop_and_deallocate();
             }
         }
     }
