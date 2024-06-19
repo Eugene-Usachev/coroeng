@@ -115,8 +115,8 @@ impl IoUringSelector {
             
             State::AcceptTcp(access_state_ptr) => {
                 let state = handle_ret_and_get_state!(ret, state, access_state_ptr, scheduler, self);
-                //let state_ptr = scheduler.get_state_ptr();
-                //unsafe { state_ptr.as_mut().do_empty(ret, scheduler.state_manager()) };
+                let state_ptr = scheduler.get_state_ptr();
+                unsafe { state_ptr.as_mut().do_empty(ret, scheduler.state_manager()) };
                 let state_ptr = Ptr::new(scheduler.state_manager().empty(ret));
                 write_ok!(state.result, TcpStream::new(state_ptr));
 
@@ -246,7 +246,7 @@ impl Selector for IoUringSelector {
             }
             State::CloseTcp(state_ptr) => unsafe {
                 let state = state_ptr.as_ref();
-                opcode::Close::new(types::Fixed(state.fd as u32))
+                opcode::Close::new(types::Fd(state.fd))
                     .build()
             }
         };

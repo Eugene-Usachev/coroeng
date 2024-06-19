@@ -2,6 +2,7 @@
 
 use std::io::Error;
 use std::fmt::{Debug, Formatter};
+use std::sync::atomic::AtomicUsize;
 import_fd_for_os!();
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use crate::coroutine::coroutine::CoroutineImpl;
@@ -274,7 +275,7 @@ impl State {
 
     #[inline(always)]
     pub fn do_empty(&mut self, fd: RawFd, manager: &mut StateManager) {
-        manager.put_state(unsafe { (self as *mut State).replace(State::new_empty(fd)) });
+        unsafe { std::ptr::write(self, manager.empty(fd)) };
     }
 
     pub fn new_empty(fd: RawFd) -> Self {

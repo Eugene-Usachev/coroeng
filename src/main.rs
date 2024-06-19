@@ -178,6 +178,8 @@ fn tcp_benchmark() {
                 break;
             }
         }
+        
+        yield stream.close();
     }
 
     #[coro]

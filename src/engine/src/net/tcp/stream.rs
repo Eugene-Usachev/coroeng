@@ -1,8 +1,8 @@
 //! This module contains [`TcpStream`].
 use std::io::Error;
 use std::net::SocketAddr;
-use std::os::fd::RawFd;
 use std::sync::atomic::AtomicUsize;
+use std::sync::Mutex;
 use crate::coroutine::{CoroutineImpl, YieldStatus};
 use crate::io::{AsyncRead, AsyncWrite, State};
 use crate::{local_scheduler};
@@ -16,7 +16,7 @@ use crate::utils::Ptr;
 ///
 /// If you want to close the stream, you can use the [`TcpStream::close`] method.
 /// Be careful, if the other side closes the stream, you need not call [`TcpStream::close`].
-/// 
+///
 /// If [`TcpStream`] has been registered, you need call [`TcpStream::unregister`].
 ///
 /// # Examples
@@ -65,14 +65,17 @@ use crate::utils::Ptr;
 /// ```
 // TODO register/unregister
 pub struct TcpStream {
-    state_ptr: Ptr<State>
+    state_ptr: Ptr<State>,
+    // TODO think about was closed
+    was_closed: bool
 }
 
 impl TcpStream {
     /// Create a new `TcpStream` from a raw file descriptor.
     pub fn new(state_ptr: Ptr<State>) -> Self {
         Self {
-            state_ptr
+            state_ptr,
+            was_closed: false
         }
     }
 
@@ -92,8 +95,14 @@ impl TcpStream {
 
     // TODO docs
     /// Closes the stream.
-    pub fn close(state_ref: Ptr<State>, res: *mut Result<(), Error>) -> YieldStatus {
-        YieldStatus::tcp_close(state_ref, res)
+    pub fn close(&mut self, res: *mut Result<(), Error>) -> YieldStatus {
+        if self.was_closed {
+            unsafe { res.write(Err(Error::new(std::io::ErrorKind::Other, "TcpStream was already closed"))) }
+            // TODO YieldStatus::None
+            return YieldStatus::Yield;
+        }
+        self.was_closed = true;
+        YieldStatus::tcp_close(self.state_ptr, res)
     }
 }
 
@@ -118,6 +127,9 @@ impl AsyncWrite<Buffer> for TcpStream {
 
 impl Drop for TcpStream {
     fn drop(&mut self) {
+        if !self.was_closed {
+            println!("TcpStream was not closed");
+        }
         let state_ptr = self.state_ptr;
         local_scheduler().put_state_ptr(state_ptr);
     }
