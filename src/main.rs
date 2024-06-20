@@ -36,6 +36,7 @@ use std::sync::atomic::Ordering::SeqCst;
 use std::{ptr, thread};
 use std::collections::VecDeque;
 use std::intrinsics::unlikely;
+use std::ops::{BitAnd, BitOr};
 use std::time::{Duration};
 use io_uring::types::{SubmitArgs, Timespec};
 use engine::{coro, run_on_all_cores, spawn_local, wait};
@@ -44,7 +45,7 @@ use engine::sleep::sleep;
 use engine::buf::{Buffer, buffer, BufPool};
 use engine::io::{AsyncRead, AsyncWrite};
 use engine::scheduler::end;
-use engine::utils::{CoreId, get_core_ids, Ptr, set_for_current};
+use engine::utils::{bits, CoreId, get_core_ids, Ptr, set_for_current};
 
 #[allow(dead_code)]
 fn docs() {
@@ -171,15 +172,13 @@ fn tcp_benchmark() {
             if slice.is_empty() {
                 break;
             }
-            let res: Result<(), Error> = yield TcpStream::write_all(&mut stream, slice);
+            let res: Result<(), Error> = yield stream.write_all(slice);
 
             if res.is_err() {
                 println!("write failed, reason: {}", res.err().unwrap());
                 break;
             }
         }
-        
-        yield stream.close();
     }
 
     #[coro]

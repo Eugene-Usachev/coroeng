@@ -4,11 +4,8 @@ use std::intrinsics::unlikely;
 use std::mem::{MaybeUninit, transmute};
 #[allow(unused_imports)] // compiler will complain if it's not used, but we need it for resume()
 use std::ops::{Coroutine, CoroutineState};
-use std::os::fd::RawFd;
 use std::ptr::null_mut;
-use std::sync::atomic::AtomicUsize;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Instant};
 use socket2::{Domain, Protocol, Socket, Type};
 use proc::coro;
 use crate::coroutine::coroutine::{CoroutineImpl};
@@ -165,8 +162,10 @@ impl Scheduler {
                     }
 
                     YieldStatus::TcpAccept(status) => {
-                        let state_ptr = status.state_ptr;
-                        unsafe { state_ptr.write(self.state_manager.accept_tcp(state_ptr.as_ref().fd(), task, status.result_ptr)) };
+                        let mut state_ptr = status.state_ptr;
+                        unsafe {
+                            state_ptr.rewrite(self.state_manager.accept_tcp(state_ptr.as_ref().fd(), task, status.result_ptr), self.state_manager());
+                        }
                         selector.register(state_ptr);
                     }
 
@@ -183,31 +182,31 @@ impl Scheduler {
                     }
 
                     YieldStatus::TcpRead(status) => {
-                        let state_ptr = status.state_ref;
+                        let mut state_ptr = status.state_ref;
                         let state_ref = unsafe { state_ptr.as_ref() };
-                        unsafe { state_ptr.write(self.state_manager.poll_tcp(state_ref.fd(), task, status.result_ptr)) };
+                        state_ptr.rewrite(self.state_manager.poll_tcp(state_ref.fd(), task, status.result_ptr), self.state_manager());
                         selector.register(state_ptr);
                     }
 
                     YieldStatus::TcpWrite(status) => {
-                        let state_ptr = status.state_ref;
+                        let mut state_ptr = status.state_ref;
                         let state_ref = unsafe { state_ptr.as_ref() };
                         let fd = state_ref.fd();
-                        unsafe { state_ptr.write(self.state_manager.write_tcp(fd, status.buffer, task, status.result_ptr)) };
+                        state_ptr.rewrite(self.state_manager.write_tcp(fd, status.buffer, task, status.result_ptr), self.state_manager());
                         selector.register(state_ptr);
                     }
 
                     YieldStatus::TcpWriteAll(status) => {
-                        let state_ptr = status.state_ref;
+                        let mut state_ptr = status.state_ref;
                         let state_ref = unsafe { state_ptr.as_ref() };
-                        unsafe { state_ptr.write(self.state_manager.write_all_tcp(state_ref.fd(), status.buffer, task, status.result_ptr)) };
+                        state_ptr.rewrite(self.state_manager.write_all_tcp(state_ref.fd(), status.buffer, task, status.result_ptr), self.state_manager());
                         selector.register(state_ptr);
                     }
 
                     YieldStatus::TcpClose(status) => {
-                        let state_ptr = status.state_ptr;
+                        let mut state_ptr = status.state_ptr;
                         let state_ref = unsafe { state_ptr.as_mut() };
-                        unsafe { state_ptr.write(self.state_manager.close_tcp(state_ref.fd(), task, status.result_ptr)) };
+                        state_ptr.rewrite(self.state_manager.close_tcp(state_ref.fd(), task, status.result_ptr), self.state_manager());
                         selector.register(state_ptr);
                     }
                 }

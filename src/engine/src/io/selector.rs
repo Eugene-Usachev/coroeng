@@ -32,6 +32,7 @@ pub trait Selector {
     ///
     /// So, you should call this method, when no ready coroutines.
     fn poll(&mut self, scheduler: &mut Scheduler) -> Result<(), ()>;
+    
     /// Registers the [`State`] with the selector.
     fn register(&mut self, state_ptr: Ptr<State>);
 }

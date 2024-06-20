@@ -159,6 +159,20 @@ impl<T> Ptr<T> {
             ptr::write(self.ptr, value);
         }
     }
+    
+    /// Replace the value, returning the old value.
+    /// 
+    /// # Panics
+    /// 
+    /// If the pointer is null.
+    #[inline(always)]
+    pub unsafe fn replace(self, value: T) -> T {
+        if self.ptr.is_null() {
+            panic!("ptr is null");
+        }
+        
+        unsafe { ptr::replace(self.ptr, value) }
+    }
 }
 
 impl<T> Clone for Ptr<T> {
@@ -346,6 +360,17 @@ mod tests {
         let ptr = Ptr::new(value);
         unsafe {
             ptr.write_with_drop(MustDrop { counter: 2 });
+        }
+    }
+    
+    #[test]
+    fn test_replace() {
+        let value = 100;
+        let ptr = Ptr::new(value);
+        unsafe {
+            assert_eq!(ptr.replace(110), value);
+            assert_eq!(*ptr.as_ref(), 110);
+            ptr.deallocate();
         }
     }
 

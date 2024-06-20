@@ -1,16 +1,17 @@
 //! This module contains [`TcpListener`].
+use std::intrinsics::unlikely;
 use std::io::Error;
+use std::mem::MaybeUninit;
 use std::net::{SocketAddr};
 use std::os::fd::{IntoRawFd, RawFd};
-use std::ptr::null_mut;
-use std::sync::atomic::AtomicUsize;
-use crate::coroutine::{CoroutineImpl, YieldStatus};
+use crate::coroutine::{YieldStatus};
 use crate::io::sys::unix::net::get_tcp_listener_fd;
 use crate::net::tcp::TcpStream;
 use crate::io::State;
 use crate::{local_scheduler};
 use crate::utils::Ptr;
 
+// TODO new docs, because &[u8] and close
 /// A TCP socket server, listening for connections.
 ///
 /// # Close
@@ -134,22 +135,26 @@ impl TcpListener {
         YieldStatus::tcp_accept(self.state_ptr, res)
     }
 
-    /// Closes the [`TcpListener`] by state_id. After closing, the [`TcpListener`] can not be used.
-    fn close(state_ref: Ptr<State>) -> YieldStatus {
-        YieldStatus::tcp_close(state_ref, null_mut())
+    /// Closes the [`TcpListener`] by [`state_ptr`](#field.state_ptr). After closing, the [`TcpListener`] can not be used.
+    fn close(state_ptr: Ptr<State>) {
+        local_scheduler().sched(Box::pin(#[coroutine] static move || {
+            let mut res_ = MaybeUninit::uninit();
+            yield YieldStatus::tcp_close(state_ptr, res_.as_mut_ptr());
+            let res = unsafe { res_.assume_init() };
+            
+            if unlikely(res.is_err()) {
+                println!("Can't close TcpListener, reason: {:?}", unsafe { res.unwrap_err_unchecked() });
+            }
+            
+            local_scheduler().put_state_ptr(state_ptr);
+        }));
     }
-}
-
-fn close_listener(state_ptr: Ptr<State>) -> CoroutineImpl {
-    Box::pin(#[coroutine] static move || {
-        yield TcpListener::close(state_ptr);
-        local_scheduler().put_state_ptr(state_ptr);
-    })
 }
 
 impl Drop for TcpListener {
     fn drop(&mut self) {
         let state_ptr = self.state_ptr;
-        local_scheduler().sched(close_listener(state_ptr));
+        TcpListener::close(state_ptr);
     }
 }
+

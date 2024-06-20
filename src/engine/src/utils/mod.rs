@@ -3,6 +3,7 @@ pub mod hide_unsafe;
 pub mod write_result;
 pub mod ptr;
 pub mod core;
+pub mod bits;
 
 pub use hide_unsafe::*;
 pub use ptr::*;
