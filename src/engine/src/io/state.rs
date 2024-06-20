@@ -55,16 +55,6 @@ pub struct WriteAllTcpState {
     pub(crate) result: *mut Result<(), Error>
 }
 
-pub struct RegisterFdState {
-    pub(crate) fd: RawFd,
-    pub(crate) coroutine: CoroutineImpl
-}
-
-pub struct DeregisterFdState {
-    pub(crate) fd: RawFd,
-    pub(crate) coroutine: CoroutineImpl
-}
-
 pub struct CloseTcpState {
     pub(crate) fd: RawFd,
     pub(crate) coroutine: CoroutineImpl,
@@ -108,8 +98,6 @@ pub enum State {
     ///
     /// This method can lead to one or more syscalls.
     WriteAllTcp(Ptr<WriteAllTcpState>),
-    RegisterFd(Ptr<RegisterFdState>),
-    DeregisterFd(Ptr<DeregisterFdState>),
     CloseTcp(Ptr<CloseTcpState>)
 }
 
@@ -121,8 +109,6 @@ pub struct StateManager {
     read_tcp_pool: Vec<Ptr<ReadTcpState>>,
     write_tcp_pool: Vec<Ptr<WriteTcpState>>,
     write_all_tcp_pool: Vec<Ptr<WriteAllTcpState>>,
-    register_fd_pool: Vec<Ptr<RegisterFdState>>,
-    deregister_fd_pool: Vec<Ptr<DeregisterFdState>>,
     close_tcp_pool: Vec<Ptr<CloseTcpState>>
 }
 
@@ -136,8 +122,6 @@ impl StateManager {
             read_tcp_pool: Vec::new(),
             write_tcp_pool: Vec::new(),
             write_all_tcp_pool: Vec::new(),
-            register_fd_pool: Vec::new(),
-            deregister_fd_pool: Vec::new(),
             close_tcp_pool: Vec::new()
         }
     }
@@ -165,8 +149,6 @@ impl StateManager {
             State::ReadTcp(state) => self.read_tcp_pool.push(state),
             State::WriteTcp(state) => self.write_tcp_pool.push(state),
             State::WriteAllTcp(state) => self.write_all_tcp_pool.push(state),
-            State::RegisterFd(state) => self.register_fd_pool.push(state),
-            State::DeregisterFd(state) => self.deregister_fd_pool.push(state),
             State::CloseTcp(state) => self.close_tcp_pool.push(state)
         }
     }
@@ -260,32 +242,6 @@ impl StateManager {
     }
     
     #[inline(always)]
-    pub fn register_fd(&mut self, fd: RawFd, coroutine: CoroutineImpl) -> State {
-        match self.register_fd_pool.pop() {
-            Some(state) => unsafe {
-                state.write(RegisterFdState { fd, coroutine });
-                State::RegisterFd(state)
-            }
-            None => {
-                State::RegisterFd(Ptr::new(RegisterFdState { fd, coroutine }))
-            }
-        }
-    }
-    
-    #[inline(always)]
-    pub fn deregister_fd(&mut self, fd: RawFd, coroutine: CoroutineImpl) -> State {
-        match self.deregister_fd_pool.pop() {
-            Some(state) => unsafe {
-                state.write(DeregisterFdState { fd, coroutine });
-                State::DeregisterFd(state)
-            }
-            None => {
-                State::DeregisterFd(Ptr::new(DeregisterFdState { fd, coroutine }))
-            }
-        }
-    }
-    
-    #[inline(always)]
     pub fn close_tcp(&mut self, fd: RawFd, coroutine: CoroutineImpl, result: *mut Result<(), Error>) -> State {
 
         match self.close_tcp_pool.pop() {
@@ -341,8 +297,6 @@ impl State {
         ReadTcp,
         WriteTcp,
         WriteAllTcp,
-        RegisterFd,
-        DeregisterFd,
         CloseTcp,
     }
     
@@ -369,7 +323,7 @@ impl State {
 }
 
 impl Ptr<State> {
-    pub fn rewrite(&mut self, new_state: State, manager: &mut StateManager) {
+    pub fn rewrite_state(&mut self, new_state: State, manager: &mut StateManager) {
         unsafe {
             manager.put_state(self.replace(new_state)); 
         }
@@ -392,8 +346,6 @@ impl Debug for State {
             State::ReadTcp(state) => unsafe { write!(f, "ReadTcp, fd: {:?}", state.as_ref().fd) }
             State::WriteTcp(state) => unsafe { write!(f, "WriteTcp, fd: {:?}", state.as_ref().fd) }
             State::WriteAllTcp(state) => unsafe { write!(f, "WriteAllTcp, fd: {:?}", state.as_ref().fd) }
-            State::RegisterFd(state) => unsafe { write!(f, "RegisterFd, fd: {:?}", state.as_ref().fd) }
-            State::DeregisterFd(state) => unsafe { write!(f, "DeregisterFd, fd: {:?}", state.as_ref().fd) }
             State::CloseTcp(state) => unsafe { write!(f, "CloseTcp, fd: {:?}", state.as_ref().fd) }
         }
     }

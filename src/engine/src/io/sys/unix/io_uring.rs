@@ -47,10 +47,7 @@ pub(crate) struct IoUringSelector {
     /// but only after the [`SubmissionQueue`] is submitted we start using the [`CompletionQueue`] that can call the [`IoUringSelector::push_sqe`]
     /// but it is safe, because the [`SubmissionQueue`] has already been read and submitted.
     ring: UnsafeCell<IoUring<squeue::Entry, cqueue::Entry>>,
-    backlog: VecDeque<squeue::Entry>,
-
-    registered_fd: Vec<RawFd>,
-    vacant_fd_slots: Vec<i32>
+    backlog: VecDeque<squeue::Entry>
 }
 
 impl IoUringSelector {
@@ -58,9 +55,7 @@ impl IoUringSelector {
         Self {
             timeout: SubmitArgs::new().timespec(&TIMEOUT),
             ring: UnsafeCell::new(IoUring::new(1024).unwrap()),
-            backlog: VecDeque::with_capacity(64),
-            registered_fd: Vec::new(),
-            vacant_fd_slots: Vec::new()
+            backlog: VecDeque::with_capacity(64)
         }
     }
 
@@ -119,9 +114,9 @@ impl IoUringSelector {
             
             State::AcceptTcp(access_state_ptr) => {
                 let state = handle_ret_and_get_state!(ret, access_state_ptr, scheduler, self);
-                let state_ptr = scheduler.get_state_ptr();
-                unsafe { state_ptr.as_mut().do_empty(ret, scheduler.state_manager()) };
-                write_ok!(state.result, TcpStream::new(state_ptr));
+                let mut new_state_ptr = scheduler.get_state_ptr();
+                new_state_ptr.rewrite_state(scheduler.state_manager().empty(ret), scheduler.state_manager());
+                write_ok!(state.result, TcpStream::new(new_state_ptr));
 
                 scheduler.handle_coroutine_state(self, state.coroutine);
             }
@@ -129,8 +124,8 @@ impl IoUringSelector {
             State::ConnectTcp(connect_tcp_state_ptr) => {
                 let state = handle_ret_and_get_state!(ret, connect_tcp_state_ptr, scheduler, self);
 
-                let new_state_ptr = scheduler.get_state_ptr();
-                unsafe { new_state_ptr.as_mut().do_empty(state.socket.into_raw_fd(), scheduler.state_manager()) };
+                let mut new_state_ptr = scheduler.get_state_ptr();
+                new_state_ptr.rewrite_state(scheduler.state_manager().empty(state.socket.into_raw_fd()), scheduler.state_manager());
                 
                 write_ok!(state.result, TcpStream::new(new_state_ptr));
 
@@ -141,7 +136,7 @@ impl IoUringSelector {
             State::PollTcp(poll_tcp_state_ptr) => {
                 let state = handle_ret_and_get_state!(ret, poll_tcp_state_ptr, scheduler, self);
 
-                ptr.rewrite(scheduler.state_manager().read_tcp(state.fd, buffer(), state.coroutine, state.result), scheduler.state_manager());
+                ptr.rewrite_state(scheduler.state_manager().read_tcp(state.fd, buffer(), state.coroutine, state.result), scheduler.state_manager());
 
                 self.register(ptr);
             }
@@ -176,33 +171,10 @@ impl IoUringSelector {
                     scheduler.handle_coroutine_state(self, state.coroutine)
                 } else {
                     state.buffer.set_offset(state.buffer.offset() + ret as usize);
-                    ptr.rewrite(scheduler.state_manager().write_all_tcp(state.fd, state.buffer, state.coroutine, state.result), scheduler.state_manager());
+                    ptr.rewrite_state(scheduler.state_manager().write_all_tcp(state.fd, state.buffer, state.coroutine, state.result), scheduler.state_manager());
 
                     self.register(ptr);
                 }
-            }
-            
-            State::RegisterFd(register_fd_state_ptr) => {
-                let registered_state = unsafe { register_fd_state_ptr.read() };
-                scheduler.put_state(state);
-
-                if ret < 0 {
-                    let err = Error::last_os_error();
-                    panic!("Failed to register fd: {}", err);
-                }
-                unsafe { ptr.as_mut().set_is_registered_true() };
-                scheduler.handle_coroutine_state(self, registered_state.coroutine)
-            }
-            
-            State::DeregisterFd(register_fd_state_ptr) => {
-                let deregistered_state = unsafe { register_fd_state_ptr.read() };
-                scheduler.put_state(state);
-
-                if ret < 0 {
-                    let err = Error::last_os_error();
-                    panic!("Failed to deregister fd: {}", err);
-                }
-                scheduler.handle_coroutine_state(self, deregistered_state.coroutine)
             }
             
             State::CloseTcp(close_tcp_state_ptr) => {
@@ -269,39 +241,6 @@ impl Selector for IoUringSelector {
                 let state = state_ptr.as_ref();
                 opcode::Send::new(types::Fd(state.fd), state.buffer.as_ptr(), state.buffer.len() as _)
                     .build()
-            }
-            State::RegisterFd(state_ptr) => unsafe {
-                let vacant_fd_slot_ = self.vacant_fd_slots.pop();
-                if let Some(vacant_fd_slot) = vacant_fd_slot_ {
-                    *self.registered_fd.get_unchecked_mut(vacant_fd_slot as usize) = state_ptr.as_mut().fd;
-                    opcode::FilesUpdate::new(&state_ptr.as_mut().fd, 1)
-                        .offset(vacant_fd_slot)
-                        .build()
-                } else {
-                    let submitter = self.ring.get_mut().submitter();
-                    submitter.unregister_files().expect("[Coroeng] Can't unregister file descriptors.");
-                    let old_len = self.registered_fd.len();
-                    let new_len = (old_len + 1) * 15 / 10;
-                    self.registered_fd.resize(new_len, -1);
-                    self.registered_fd[old_len] = state_ptr.as_mut().fd;
-                    for i in old_len..new_len {
-                        self.vacant_fd_slots.push(i as _);
-                    }
-                    
-                    opcode::FilesUpdate::new(self.registered_fd.as_ptr(), new_len as _)
-                        .build()
-                }
-            }
-            State::DeregisterFd(state_ptr) => unsafe {
-                let fd = state_ptr.as_ref().fd;
-                for i in 0..self.registered_fd.len() {
-                    if self.registered_fd[i] == fd {
-                        self.vacant_fd_slots.push(i as _);
-                        return;
-                    }
-                }
-                println!("[Coroeng] Tried to deregister an fd that wasn't registered in the selector. fd: {}", fd);
-                return;
             }
             State::CloseTcp(state_ptr) => unsafe {
                 let state = state_ptr.as_ref();

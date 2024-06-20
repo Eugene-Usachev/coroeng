@@ -154,17 +154,17 @@ impl Scheduler {
 
                     YieldStatus::NewTcpListener(status) => {
                         let fd = TcpListener::get_fd(status.address);
-                        let state = self.get_state_ptr();
-                        unsafe { state.as_mut() }.do_empty(fd, self.state_manager());
-                        unsafe { status.listener_ptr.write(TcpListener::from_state_ptr(state)); }
-
+                        let mut state_ptr = self.get_state_ptr();
+                        state_ptr.rewrite_state(self.state_manager().empty(fd), self.state_manager());
+                        unsafe { status.listener_ptr.write(TcpListener::from_state_ptr(state_ptr)); }
+                        
                         self.handle_coroutine_state(selector, task);
                     }
 
                     YieldStatus::TcpAccept(status) => {
                         let mut state_ptr = status.state_ptr;
                         unsafe {
-                            state_ptr.rewrite(self.state_manager.accept_tcp(state_ptr.as_ref().fd(), task, status.result_ptr), self.state_manager());
+                            state_ptr.rewrite_state(self.state_manager.accept_tcp(state_ptr.as_ref().fd(), task, status.result_ptr), self.state_manager());
                         }
                         selector.register(state_ptr);
                     }
@@ -184,7 +184,7 @@ impl Scheduler {
                     YieldStatus::TcpRead(status) => {
                         let mut state_ptr = status.state_ref;
                         let state_ref = unsafe { state_ptr.as_ref() };
-                        state_ptr.rewrite(self.state_manager.poll_tcp(state_ref.fd(), task, status.result_ptr), self.state_manager());
+                        state_ptr.rewrite_state(self.state_manager.poll_tcp(state_ref.fd(), task, status.result_ptr), self.state_manager());
                         selector.register(state_ptr);
                     }
 
@@ -192,21 +192,21 @@ impl Scheduler {
                         let mut state_ptr = status.state_ref;
                         let state_ref = unsafe { state_ptr.as_ref() };
                         let fd = state_ref.fd();
-                        state_ptr.rewrite(self.state_manager.write_tcp(fd, status.buffer, task, status.result_ptr), self.state_manager());
+                        state_ptr.rewrite_state(self.state_manager.write_tcp(fd, status.buffer, task, status.result_ptr), self.state_manager());
                         selector.register(state_ptr);
                     }
 
                     YieldStatus::TcpWriteAll(status) => {
                         let mut state_ptr = status.state_ref;
                         let state_ref = unsafe { state_ptr.as_ref() };
-                        state_ptr.rewrite(self.state_manager.write_all_tcp(state_ref.fd(), status.buffer, task, status.result_ptr), self.state_manager());
+                        state_ptr.rewrite_state(self.state_manager.write_all_tcp(state_ref.fd(), status.buffer, task, status.result_ptr), self.state_manager());
                         selector.register(state_ptr);
                     }
 
                     YieldStatus::TcpClose(status) => {
                         let mut state_ptr = status.state_ptr;
                         let state_ref = unsafe { state_ptr.as_mut() };
-                        state_ptr.rewrite(self.state_manager.close_tcp(state_ref.fd(), task, status.result_ptr), self.state_manager());
+                        state_ptr.rewrite_state(self.state_manager.close_tcp(state_ref.fd(), task, status.result_ptr), self.state_manager());
                         selector.register(state_ptr);
                     }
                 }
