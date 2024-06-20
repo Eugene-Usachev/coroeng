@@ -221,14 +221,16 @@ impl<T: Debug> Debug for Ptr<T> {
 #[cfg(test)]
 mod tests {
     use super::Ptr;
-    struct MustDrop {
+    struct MustDropIfCounterMoreThanOne {
         #[allow(dead_code)]
         counter: u32
     }
 
-    impl Drop for MustDrop {
+    impl Drop for MustDropIfCounterMoreThanOne {
         fn drop(&mut self) {
-            panic!("dropped");
+            if self.counter > 1 {
+                panic!("dropped");
+            }
         }
     }
 
@@ -315,7 +317,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "dropped")]
     fn test_drop_in_place() {
-        let value = MustDrop { counter: 5 };
+        let value = MustDropIfCounterMoreThanOne { counter: 5 };
         let ptr = Ptr::new(value);
         unsafe {
             ptr.drop_in_place();
@@ -325,7 +327,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "dropped")]
     fn test_drop_and_deallocate() {
-        let value = MustDrop { counter: 5 };
+        let value = MustDropIfCounterMoreThanOne { counter: 5 };
         let ptr = Ptr::new(value);
         unsafe {
             ptr.drop_and_deallocate();
@@ -356,10 +358,10 @@ mod tests {
     #[test]
     #[should_panic(expected = "dropped")]
     fn test_write_with_drop() {
-        let value = MustDrop { counter: 1 };
+        let value = MustDropIfCounterMoreThanOne { counter: 2 };
         let ptr = Ptr::new(value);
         unsafe {
-            ptr.write_with_drop(MustDrop { counter: 2 });
+            ptr.write_with_drop(MustDropIfCounterMoreThanOne { counter: 1 });
         }
     }
     

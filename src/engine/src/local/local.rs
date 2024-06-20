@@ -9,10 +9,14 @@ use std::fmt::Debug;
 use crate::local::get_worker_id;
 use crate::utils::Ptr;
 
+struct Inner<T> {
+    data: T,
+    counter: usize
+}
+
 pub struct Local<T> {
     worker_id: usize,
-    data: Ptr<T>,
-    counter: Ptr<usize>
+    inner: Ptr<Inner<T>>
 }
 
 impl<T> Local<T> {
@@ -24,33 +28,7 @@ impl<T> Local<T> {
 
         Local {
             worker_id,
-            data: Ptr::new(data),
-            counter: Ptr::new(1)
-        }
-    }
-
-    #[inline(always)]
-    fn inc_counter(&self) {
-        if self.worker_id != get_worker_id() {
-            panic!("Tried to inc_counter from another worker!");
-        }
-
-        unsafe {
-            *&mut *self.counter.as_ptr() += 1;
-        }
-    }
-
-    #[inline(always)]
-    fn dec_counter(&self) -> usize {
-        if self.worker_id != get_worker_id() {
-            panic!("Tried to dec_counter from another worker!");
-        }
-
-        unsafe {
-            let reference = &mut *self.counter.as_ptr();
-            let new = *reference - 1;
-            *reference = new;
-            new
+            inner: Ptr::new(Inner { data, counter: 1 })
         }
     }
 
@@ -58,22 +36,72 @@ impl<T> Local<T> {
     pub fn check_worker_id(&self) -> bool {
         self.worker_id == get_worker_id()
     }
+    
+    #[inline(always)]
+     unsafe fn inc_counter_unchecked(&self) {
+        unsafe { self.inner.as_mut().counter += 1; }
+    }
+
+    #[inline(always)]
+    fn inc_counter(&self) {
+        if !self.check_worker_id() {
+            panic!("Tried to inc_counter from another worker!");
+        }
+
+        unsafe { self.inc_counter_unchecked() }
+    }
+    
+    #[inline(always)]
+     unsafe fn dec_counter_unchecked(&self) -> usize {
+        let reference = unsafe { self.inner.as_mut() };
+        reference.counter -= 1;
+        reference.counter
+    }
+
+    #[inline(always)]
+    fn dec_counter(&self) -> usize {
+        if !self.check_worker_id() {
+            panic!("Tried to dec_counter from another worker!");
+        }
+
+        unsafe { self.dec_counter_unchecked() }
+    }
+    
+    #[inline(always)]
+    pub unsafe fn get_unchecked<'a>(&self) -> &'a T {
+        unsafe { &self.inner.as_ref().data }
+    }
 
     #[inline(always)]
     pub fn get<'a>(&self) -> &'a T {
         if self.check_worker_id() {
-            unsafe { self.data.as_ref() }
+            unsafe { self.get_unchecked() }
         } else {
             panic!("Tried to get local data from another worker!");
         }
+    }
+    
+    #[inline(always)]
+    pub unsafe fn get_mut_unchecked<'a>(&self) -> &'a mut T {
+        unsafe { &mut self.inner.as_mut().data }
     }
 
     #[inline(always)]
     pub fn get_mut<'a>(&self) -> &'a mut T {
         if self.check_worker_id() {
-            unsafe { self.data.as_mut() }
+            unsafe { self.get_mut_unchecked() }
         } else {
             panic!("Tried to get_mut local data from another worker!");
+        }
+    }
+
+    #[inline(always)]
+    pub unsafe fn clone_unchecked(&self) -> Local<T> {
+        unsafe { self.inc_counter_unchecked() };
+        
+        Local {
+            worker_id: self.worker_id,
+            inner: self.inner
         }
     }
 }
@@ -95,8 +123,7 @@ impl<T> Clone for Local<T> {
         self.inc_counter();
         Self {
             worker_id: self.worker_id,
-            data: self.data,
-            counter: self.counter
+            inner: self.inner
         }
     }
 }
@@ -105,8 +132,7 @@ impl<T> Drop for Local<T> {
     fn drop(&mut self) {
         if self.dec_counter() == 0 {
             unsafe {
-                self.data.drop_and_deallocate();
-                self.counter.drop_and_deallocate();
+                self.inner.drop_and_deallocate();
             }
         }
     }
@@ -130,8 +156,9 @@ mod tests {
     fn test_new_success() {
         let local = Local::new(5);
         assert_eq!(local.worker_id, 1);
-        assert_eq!(unsafe { *local.data.as_ptr() }, 5);
-        assert_eq!(unsafe { *local.counter.as_ptr() }, 1);
+        let reference = unsafe { local.inner.as_ref() };
+        assert_eq!(reference.data, 5);
+        assert_eq!(reference.counter, 1);
     }
 
     // TODO after coroutine leak
@@ -146,7 +173,7 @@ mod tests {
     fn test_inc_counter() {
         let local = Local::new(5);
         local.inc_counter();
-        assert_eq!(unsafe { *local.counter.as_ptr() }, 2);
+        assert_eq!(unsafe { local.inner.as_ref().counter }, 2);
     }
 
     // TODO after coroutine leak
@@ -216,9 +243,9 @@ mod tests {
     fn test_clone() {
         let local = Local::new(5);
         let local_clone = local.clone();
-        assert_eq!(unsafe { *local.counter.as_ptr() }, 2);
+        assert_eq!(unsafe { local.inner.as_ref().counter }, 2);
         assert_eq!(local.worker_id, local_clone.worker_id);
-        assert_eq!(unsafe { *local.data.as_ptr() }, unsafe { *local_clone.data.as_ptr() });
+        assert_eq!(unsafe { local.inner.as_ref().data }, unsafe { local_clone.inner.as_ref().data });
     }
 
     #[test_local(crate="crate")]

@@ -100,6 +100,7 @@ pub fn run_on_all_cores<T, C: 'static + Send + Clone + Fn(*mut T) -> CoroutineIm
         let core = cores[i];
         let creator = creator.clone();
         std::thread::Builder::new()
+            // TODO worker with id in panic and check worker id code
             .name(format!("worker on core: {}", i))
             .spawn(move || {
                 run_on_core(creator, core);
