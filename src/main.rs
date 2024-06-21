@@ -39,7 +39,7 @@ use std::intrinsics::unlikely;
 use std::ops::{BitAnd, BitOr};
 use std::time::{Duration};
 use io_uring::types::{SubmitArgs, Timespec};
-use engine::{coro, run_on_all_cores, spawn_local, wait};
+use engine::{coro, run_on_all_cores, run_on_core, spawn_local, wait};
 use engine::net::{TcpListener, TcpStream};
 use engine::sleep::sleep;
 use engine::buf::{Buffer, buffer, BufPool};
@@ -87,7 +87,10 @@ fn ping_pong() {
 
         let mut stream: TcpStream = stream_.unwrap();
         unsafe {
-            println!("connected: {}, fd: {}", C.fetch_add(1, SeqCst) + 1, stream.state_ptr().as_ref().fd());
+            let c = C.fetch_add(1, SeqCst) + 1;
+            if c % 100 == 0 {
+                println!("connected: {}, fd: {}", c, stream.state_ptr().as_ref().fd());
+            }
         }
         let mut buf: Buffer;
         let mut res: Result<Buffer, Error>;
@@ -106,8 +109,7 @@ fn ping_pong() {
             let res = res.unwrap();
 
             if res.as_ref() == b"pong" {
-                println!("Pong has been received");
-                yield sleep(Duration::from_secs(2));
+                //yield sleep(Duration::from_secs(2));
             } else {
                 println!("Pong has not been received!, received: {:?}", String::from_utf8(res.as_ref().to_vec()).unwrap());
                 break;
@@ -198,6 +200,34 @@ fn tcp_benchmark() {
     }
 
     run_on_all_cores(start_server);
+    //run_on_core(start_server, get_core_ids().unwrap()[0]);
+}
+
+fn tcp_client_benchmark() {
+    #[coro]
+    fn handle_connection() {
+        let stream_ = yield TcpStream::connect("client:8079".to_socket_addrs().unwrap().next().unwrap());
+        if stream_.is_err() {
+            println!("connect failed, reason: {}", stream_.err().unwrap());
+            return;
+        }
+        let mut stream: TcpStream = stream_.unwrap();
+        yield stream.read();
+        panic!("read!")
+    }
+    
+    #[coro]
+    fn client() {
+        yield sleep(Duration::from_secs(3));
+        println!("start");
+        for _ in 0..20_000 {
+            spawn_local!(handle_connection());
+        }
+        
+        yield sleep(Duration::from_secs(1000));
+    }
+    
+    run_on_core(client, get_core_ids().unwrap()[0]);
 }
 
 fn tcp_profile() {
@@ -330,248 +360,9 @@ fn leak_test() {
 fn main() {
     //run_on_core(leak_test, get_core_ids().unwrap()[0]);
     //docs();
-    //io_uring();
     //tcp_profile();
+    //tcp_client_benchmark();
     tcp_benchmark();
     //run_on_core(ping_pong, get_core_ids().unwrap()[0]);
     //std1();
-}
-
-fn io_uring() -> Result<(), Error> {
-    use std::os::unix::io::{AsRawFd, RawFd};
-    use io_uring::{opcode, squeue, cqueue, types, IoUring, SubmissionQueue};
-    println!("io_uring");
-
-    #[derive(Debug)]
-    enum Token {
-        Accept,
-        Poll {
-            fd: RawFd,
-        },
-        Read {
-            fd: RawFd,
-            buf: Buffer
-        },
-        Write {
-            fd: RawFd,
-            buf: Buffer,
-            offset: usize,
-            len: usize,
-        }
-    }
-
-    struct AcceptCount {
-        entry: squeue::Entry,
-        count: usize,
-    }
-
-    impl AcceptCount {
-        fn new(fd: RawFd, token: u64, count: usize) -> AcceptCount {
-            AcceptCount {
-                entry: opcode::Accept::new(types::Fd(fd), ptr::null_mut(), ptr::null_mut())
-                    .build()
-                    .user_data(token),
-                count
-            }
-        }
-
-        pub fn push_to(&mut self, sq: &mut SubmissionQueue<'_>) {
-            while self.count > 0 {
-                unsafe {
-                    match sq.push(&self.entry) {
-                        Ok(_) => self.count -= 1,
-                        Err(_) => break,
-                    }
-                }
-            }
-
-            sq.sync();
-        }
-    }
-
-    fn run(cpu: CoreId) -> Result<(), Error> {
-        BufPool::init_in_local_thread(4096);
-        set_for_current(cpu);
-        const CAP: usize = 512;
-        let mut ring: IoUring<squeue::Entry, cqueue::Entry> = IoUring::builder()
-            .build(CAP as u32)?;
-
-        let listener_fd = TcpListener::get_fd("engine:8081".to_socket_addrs().unwrap().next().unwrap());
-
-        let mut backlog = VecDeque::with_capacity(CAP);
-
-        let (submitter, mut sq, mut cq) = ring.split();
-        let token_id = Ptr::new(Token::Accept).as_u64();
-        let mut accept = AcceptCount::new(listener_fd.as_raw_fd(), token_id, 1);
-        accept.push_to(&mut sq);
-
-        loop {
-            accept.push_to(&mut sq);
-
-            // clean backlog
-            loop {
-                if sq.is_full() {
-                    match submitter.submit() {
-                        Ok(_) => (),
-                        Err(ref err) if err.raw_os_error() == Some(libc::EBUSY) => break,
-                        Err(err) => return Err(err.into()),
-                    }
-                }
-                sq.sync();
-
-                match backlog.pop_front() {
-                    Some(sqe) => unsafe {
-                        let _ = sq.push(&sqe);
-                    },
-                    None => break,
-                }
-            }
-
-            match submitter.submit_with_args(1, &SubmitArgs::new().timespec(&Timespec::new().nsec(500_000))) {
-                Ok(_) => (),
-                Err(ref err) if err.raw_os_error() == Some(libc::ETIME) => (),
-                Err(ref err) if err.raw_os_error() == Some(libc::EBUSY) => (),
-                Err(err) => return Err(err.into()),
-            }
-            cq.sync();
-
-            for cqe in &mut cq {
-                let ret = cqe.result();
-                let token_index = cqe.user_data();
-                let token = Ptr::from(token_index);
-
-                if ret < 0 {
-                    unsafe { token.drop_and_deallocate() };
-                    eprintln!(
-                        "token {:?} error: {:?}",
-                        token,
-                        Error::from_raw_os_error(-ret)
-                    );
-                    continue;
-                }
-
-                match unsafe { token.read() } {
-                    Token::Accept => {
-                        accept.count += 1;
-
-                        let fd = ret;
-                        let poll_e = opcode::PollAdd::new(types::Fd(fd), libc::POLLIN as _)
-                            .build()
-                            .user_data(Ptr::new(Token::Poll { fd }).as_u64());
-
-                        unsafe {
-                            if sq.push(&poll_e).is_err() {
-                                backlog.push_back(poll_e);
-                            }
-                        }
-                    }
-
-                    Token::Poll { fd } => {
-                        let mut buf = buffer();
-                        let ptr = buf.as_mut_ptr();
-                        let cap = buf.cap();
-                        unsafe { token.write(Token::Read { fd, buf }) };
-                        let read_e = opcode::Recv::new(types::Fd(fd), ptr, cap as u32)
-                            .build()
-                            .user_data(token_index);
-
-                        unsafe {
-                            if sq.push(&read_e).is_err() {
-                                backlog.push_back(read_e);
-                            }
-                        }
-                    }
-
-                    Token::Read { fd, mut buf } => {
-                        if unlikely(ret == 0) {
-                            println!("fd: {} closed", fd);
-                            unsafe {token.drop_and_deallocate()};
-                            unsafe {
-                                libc::close(fd);
-                            }
-                        } else {
-                            let len = ret as usize;
-                            let ptr = buf.as_mut_ptr();
-
-                            unsafe {
-                                token.write(Token::Write {
-                                    fd,
-                                    buf,
-                                    len,
-                                    offset: 0,
-                                });
-                            };
-
-                            let write_e = opcode::Send::new(types::Fd(fd), ptr, len as _)
-                                .build()
-                                .user_data(token_index);
-
-                            unsafe {
-                                if sq.push(&write_e).is_err() {
-                                    backlog.push_back(write_e);
-                                }
-                            }
-                        }
-                    }
-
-                    Token::Write {
-                        fd,
-                        mut buf,
-                        offset,
-                        len,
-                    } => {
-                        let write_len = ret as usize;
-
-                        let entry = if offset + write_len >= len {
-                            unsafe {
-                                token.write(Token::Poll { fd });
-                            }
-
-                            opcode::PollAdd::new(types::Fd(fd), libc::POLLIN as _)
-                                .build()
-                                .user_data(token_index)
-                        } else {
-                            let offset = offset + write_len;
-                            let len = len - offset;
-                            buf.set_offset(offset);
-                            let ptr = buf.as_mut_ptr();
-
-                            unsafe {
-                                token.write(Token::Write {
-                                    fd,
-                                    buf,
-                                    offset,
-                                    len,
-                                });
-                            }
-
-                            opcode::Write::new(types::Fd(fd), ptr, len as _)
-                                .build()
-                                .user_data(token_index)
-                        };
-
-                        unsafe {
-                            if sq.push(&entry).is_err() {
-                                backlog.push_back(entry);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    let cores = get_core_ids().unwrap();
-
-    for i in 1..cores.len() {
-        let core = cores[i % cores.len()];
-        thread::spawn(move || {
-            run(core).expect("Failed to run");
-        });
-    }
-
-    let core = cores[0];
-    run(core)?;
-
-    Ok(())
 }

@@ -133,7 +133,7 @@ impl IoUringSelector {
                 unsafe { ptr.drop_and_deallocate() };
             }
             
-            State::PollTcp(poll_tcp_state_ptr) => {
+            State::Poll(poll_tcp_state_ptr) => {
                 let state = handle_ret_and_get_state!(ret, poll_tcp_state_ptr, scheduler, self);
 
                 ptr.rewrite_state(scheduler.state_manager().read_tcp(state.fd, buffer(), state.coroutine, state.result), scheduler.state_manager());
@@ -141,7 +141,7 @@ impl IoUringSelector {
                 self.register(ptr);
             }
             
-            State::ReadTcp(read_tcp_state_ptr) => {
+            State::Recv(read_tcp_state_ptr) => {
                 let mut state = handle_ret_and_get_state!(ret, read_tcp_state_ptr, scheduler, self);
 
                 state.buffer.add_written(ret as usize);
@@ -150,7 +150,7 @@ impl IoUringSelector {
                 scheduler.handle_coroutine_state(self, state.coroutine)
             }
             
-            State::WriteTcp(write_tcp_state_ptr) => {
+            State::Send(write_tcp_state_ptr) => {
                 let mut state = handle_ret_and_get_state!(ret, write_tcp_state_ptr, scheduler, self);
 
                 if ret as usize == state.buffer.len() {
@@ -163,7 +163,7 @@ impl IoUringSelector {
                 scheduler.handle_coroutine_state(self, state.coroutine)
             }
             
-            State::WriteAllTcp(write_all_tcp_state_ptr) => {
+            State::SendAll(write_all_tcp_state_ptr) => {
                 let mut state = handle_ret_and_get_state!(ret, write_all_tcp_state_ptr, scheduler, self);
 
                 if ret as usize == state.buffer.len() {
@@ -177,7 +177,7 @@ impl IoUringSelector {
                 }
             }
             
-            State::CloseTcp(close_tcp_state_ptr) => {
+            State::Close(close_tcp_state_ptr) => {
                 let state = handle_ret_and_get_state!(ret, close_tcp_state_ptr, scheduler, self);
                 
                 write_ok!(state.result, ());
@@ -222,27 +222,27 @@ impl Selector for IoUringSelector {
                 opcode::Connect::new(types::Fd(state.socket.as_raw_fd()), state.address.as_ptr(), state.address.len())
                     .build()
             }
-            State::PollTcp(state_ptr) => unsafe {
+            State::Poll(state_ptr) => unsafe {
                 let state = state_ptr.as_ref();
                 opcode::PollAdd::new(types::Fd(state.fd), libc::POLLIN as _)
                     .build()
             }
-            State::ReadTcp(state_ptr) => unsafe {
+            State::Recv(state_ptr) => unsafe {
                 let state = state_ptr.as_mut();
                 opcode::Recv::new(types::Fd(state.fd), state.buffer.as_mut_ptr(), state.buffer.cap() as _)
                     .build()
             }
-            State::WriteTcp(state_ptr) => unsafe {
+            State::Send(state_ptr) => unsafe {
                 let state = state_ptr.as_ref();
                 opcode::Send::new(types::Fd(state.fd), state.buffer.as_ptr(), state.buffer.len() as _)
                     .build()
             }
-            State::WriteAllTcp(state_ptr) => unsafe {
+            State::SendAll(state_ptr) => unsafe {
                 let state = state_ptr.as_ref();
                 opcode::Send::new(types::Fd(state.fd), state.buffer.as_ptr(), state.buffer.len() as _)
                     .build()
             }
-            State::CloseTcp(state_ptr) => unsafe {
+            State::Close(state_ptr) => unsafe {
                 let state = state_ptr.as_ref();
                 opcode::Close::new(types::Fd(state.fd))
                     .build()

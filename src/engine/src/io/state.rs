@@ -28,34 +28,34 @@ pub struct ConnectTcpState {
     pub(crate) result: *mut Result<TcpStream, Error>
 }
 
-pub struct PollTcpState {
+pub struct PollState {
     pub(crate) fd: RawFd,
     pub(crate) coroutine: CoroutineImpl,
     pub(crate) result: *mut Result<Buffer, Error>
 }
 
-pub struct ReadTcpState {
+pub struct RecvState {
     pub(crate) fd: RawFd,
     pub(crate) buffer: Buffer,
     pub(crate) coroutine: CoroutineImpl,
     pub(crate) result: *mut Result<Buffer, Error>
 }
 
-pub struct WriteTcpState {
+pub struct SendState {
     pub(crate) fd: RawFd,
     pub(crate) buffer: Buffer,
     pub(crate) coroutine: CoroutineImpl,
     pub(crate) result: *mut Result<Option<Buffer>, Error>
 }
 
-pub struct WriteAllTcpState {
+pub struct SendAllState {
     pub(crate) fd: RawFd,
     pub(crate) buffer: Buffer,
     pub(crate) coroutine: CoroutineImpl,
     pub(crate) result: *mut Result<(), Error>
 }
 
-pub struct CloseTcpState {
+pub struct CloseState {
     pub(crate) fd: RawFd,
     pub(crate) coroutine: CoroutineImpl,
     pub(crate) result: *mut Result<(), Error>
@@ -64,18 +64,18 @@ pub struct CloseTcpState {
 // TODO Update for not box
 /// # Why using [`Box`]?
 ///
-/// Typically, most states are [`PollTcpState`], which weighs 32 bytes (40 including the enum itself).
+/// Typically, most states are [`PollState`], which weighs 32 bytes (40 including the enum itself).
 /// At this time, the heaviest states considering the enum itself weigh 80 bytes, which makes the entire enum [`State`] weigh 80 bytes.
 /// To avoid this, states are stacked in a [`Box`], thereby allowing the enum itself to weigh 16 bytes (any state weighs 16 bytes + its own weight, except [`EmptyState`]).
-/// This allows to reduce the overall weight of all states (in the example with [`PollTcpState`] State([`PollTcpState`]) now weighs 48 bytes).
+/// This allows to reduce the overall weight of all states (in the example with [`PollState`] State([`PollState`]) now weighs 48 bytes).
 /// Since states are only used in IO operations, which are much more expensive than dereferencing, there is no performance impact.
 pub enum State {
     Empty(EmptyState),
     AcceptTcp(Ptr<AcceptTcpState>),
     ConnectTcp(Ptr<ConnectTcpState>),
-    PollTcp(Ptr<PollTcpState>),
-    ReadTcp(Ptr<ReadTcpState>),
-    /// Tells the selector that [`WriteTcpState`](WriteTcpState) or another writable [`State`] is ready.
+    Poll(Ptr<PollState>),
+    Recv(Ptr<RecvState>),
+    /// Tells the selector that [`SendState`](SendState) or another writable [`State`] is ready.
     /// So, this method returns before the write syscall is done. The writing will be done in [`Selector::poll`].
     ///
     /// # Panics
@@ -86,8 +86,8 @@ pub enum State {
     ///
     /// This method will lead to one syscall. Only the part of the buffer will be written.
     /// The number of bytes written will be stored in the result variable.
-    WriteTcp(Ptr<WriteTcpState>),
-    /// Tells the selector that [`WriteAllTcpState`](crate::io::WriteAllTcpState) or another writable [`State`] is ready.
+    Send(Ptr<SendState>),
+    /// Tells the selector that [`SendAllState`](crate::io::SendAllState) or another writable [`State`] is ready.
     /// So, this method returns before the write syscall is done. The writing will be done in [`Selector::poll`].
     ///
     /// # Panics
@@ -97,19 +97,19 @@ pub enum State {
     /// # Note
     ///
     /// This method can lead to one or more syscalls.
-    WriteAllTcp(Ptr<WriteAllTcpState>),
-    CloseTcp(Ptr<CloseTcpState>)
+    SendAll(Ptr<SendAllState>),
+    Close(Ptr<CloseState>)
 }
 
 pub struct StateManager {
     state_ptr_pool: Vec<Ptr<State>>,
     accept_tcp_pool: Vec<Ptr<AcceptTcpState>>,
     connect_tcp_pool: Vec<Ptr<ConnectTcpState>>,
-    poll_tcp_pool: Vec<Ptr<PollTcpState>>,
-    read_tcp_pool: Vec<Ptr<ReadTcpState>>,
-    write_tcp_pool: Vec<Ptr<WriteTcpState>>,
-    write_all_tcp_pool: Vec<Ptr<WriteAllTcpState>>,
-    close_tcp_pool: Vec<Ptr<CloseTcpState>>
+    poll_tcp_pool: Vec<Ptr<PollState>>,
+    read_tcp_pool: Vec<Ptr<RecvState>>,
+    write_tcp_pool: Vec<Ptr<SendState>>,
+    write_all_tcp_pool: Vec<Ptr<SendAllState>>,
+    close_tcp_pool: Vec<Ptr<CloseState>>
 }
 
 impl StateManager {
@@ -145,11 +145,11 @@ impl StateManager {
             State::Empty(_) => {}
             State::AcceptTcp(state) => self.accept_tcp_pool.push(state),
             State::ConnectTcp(state) => self.connect_tcp_pool.push(state),
-            State::PollTcp(state) => self.poll_tcp_pool.push(state),
-            State::ReadTcp(state) => self.read_tcp_pool.push(state),
-            State::WriteTcp(state) => self.write_tcp_pool.push(state),
-            State::WriteAllTcp(state) => self.write_all_tcp_pool.push(state),
-            State::CloseTcp(state) => self.close_tcp_pool.push(state)
+            State::Poll(state) => self.poll_tcp_pool.push(state),
+            State::Recv(state) => self.read_tcp_pool.push(state),
+            State::Send(state) => self.write_tcp_pool.push(state),
+            State::SendAll(state) => self.write_all_tcp_pool.push(state),
+            State::Close(state) => self.close_tcp_pool.push(state)
         }
     }
     
@@ -190,11 +190,11 @@ impl StateManager {
 
         match self.poll_tcp_pool.pop() {
             Some(state) => unsafe {
-                state.write(PollTcpState { fd, coroutine, result });
-                State::PollTcp(state)
+                state.write(PollState { fd, coroutine, result });
+                State::Poll(state)
             }
             None => {
-                State::PollTcp(Ptr::new(PollTcpState { fd, coroutine, result }))
+                State::Poll(Ptr::new(PollState { fd, coroutine, result }))
             }
         }
     }
@@ -204,11 +204,11 @@ impl StateManager {
 
         match self.read_tcp_pool.pop() {
             Some(state) => unsafe {
-                state.write(ReadTcpState { fd, buffer, coroutine, result });
-                State::ReadTcp(state)
+                state.write(RecvState { fd, buffer, coroutine, result });
+                State::Recv(state)
             }
             None => {
-                State::ReadTcp(Ptr::new(ReadTcpState { fd, buffer, coroutine, result }))
+                State::Recv(Ptr::new(RecvState { fd, buffer, coroutine, result }))
             }
         }
     }
@@ -218,11 +218,11 @@ impl StateManager {
 
         match self.write_tcp_pool.pop() {
             Some(state) => unsafe {
-                state.write(WriteTcpState { fd, buffer, coroutine, result });
-                State::WriteTcp(state)
+                state.write(SendState { fd, buffer, coroutine, result });
+                State::Send(state)
             }
             None => {
-                State::WriteTcp(Ptr::new(WriteTcpState { fd, buffer, coroutine, result }))
+                State::Send(Ptr::new(SendState { fd, buffer, coroutine, result }))
             }
         }
     }
@@ -232,11 +232,11 @@ impl StateManager {
 
         match self.write_all_tcp_pool.pop() {
             Some(state) => unsafe {
-                state.write(WriteAllTcpState { fd, buffer, coroutine, result });
-                State::WriteAllTcp(state)
+                state.write(SendAllState { fd, buffer, coroutine, result });
+                State::SendAll(state)
             }
             None => {
-                State::WriteAllTcp(Ptr::new(WriteAllTcpState { fd, buffer, coroutine, result }))
+                State::SendAll(Ptr::new(SendAllState { fd, buffer, coroutine, result }))
             }
         }
     }
@@ -246,11 +246,11 @@ impl StateManager {
 
         match self.close_tcp_pool.pop() {
             Some(state) => unsafe {
-                state.write(CloseTcpState { fd, coroutine, result });
-                State::CloseTcp(state)
+                state.write(CloseState { fd, coroutine, result });
+                State::Close(state)
             }
             None => {
-                State::CloseTcp(Ptr::new(CloseTcpState { fd, coroutine, result }))
+                State::Close(Ptr::new(CloseState { fd, coroutine, result }))
             }
         }
     }
@@ -293,11 +293,11 @@ macro_rules! generate_fd_with_flag_and_set_fd {
 impl State {
     generate_fd_with_flag_and_set_fd! {
         AcceptTcp,
-        PollTcp,
-        ReadTcp,
-        WriteTcp,
-        WriteAllTcp,
-        CloseTcp,
+        Poll,
+        Recv,
+        Send,
+        SendAll,
+        Close,
     }
     
     /// Get the file descriptor associated with this state.
@@ -342,11 +342,11 @@ impl Debug for State {
                     state.as_ref().address
                 )
             }
-            State::PollTcp(state) => unsafe { write!(f, "PollTcp, fd: {:?}", state.as_ref().fd) }
-            State::ReadTcp(state) => unsafe { write!(f, "ReadTcp, fd: {:?}", state.as_ref().fd) }
-            State::WriteTcp(state) => unsafe { write!(f, "WriteTcp, fd: {:?}", state.as_ref().fd) }
-            State::WriteAllTcp(state) => unsafe { write!(f, "WriteAllTcp, fd: {:?}", state.as_ref().fd) }
-            State::CloseTcp(state) => unsafe { write!(f, "CloseTcp, fd: {:?}", state.as_ref().fd) }
+            State::Poll(state) => unsafe { write!(f, "Poll, fd: {:?}", state.as_ref().fd) }
+            State::Recv(state) => unsafe { write!(f, "Recv, fd: {:?}", state.as_ref().fd) }
+            State::Send(state) => unsafe { write!(f, "Send, fd: {:?}", state.as_ref().fd) }
+            State::SendAll(state) => unsafe { write!(f, "SendAll, fd: {:?}", state.as_ref().fd) }
+            State::Close(state) => unsafe { write!(f, "Close, fd: {:?}", state.as_ref().fd) }
         }
     }
 }

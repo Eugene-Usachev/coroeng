@@ -225,11 +225,6 @@ impl Scheduler {
         self.state_manager.put_state_ptr(state_ptr);
     }
 
-    #[inline(always)]
-    pub(crate) fn put_state(&mut self, state_ptr: State) {
-        self.state_manager.put_state(state_ptr);
-    }
-
     /// Start the [`Scheduler`] and create [`Selector`].
     pub fn run(&mut self, main_func: CoroutineImpl) {
         // TODO maybe r?
