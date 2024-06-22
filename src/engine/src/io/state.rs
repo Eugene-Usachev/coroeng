@@ -7,6 +7,7 @@ use socket2::{SockAddr, Socket};
 use crate::coroutine::coroutine::CoroutineImpl;
 use crate::net::tcp::TcpStream;
 use crate::buf::Buffer;
+use crate::fs::OpenOptions;
 use crate::import_fd_for_os;
 use crate::utils::{Ptr};
 
@@ -63,6 +64,7 @@ pub struct CloseState {
 
 pub struct OpenState {
     pub(crate) path: String,
+    pub(crate) options: OpenOptions,
     pub(crate) coroutine: CoroutineImpl,
     pub(crate) result: *mut Result<RawFd, Error>
 }

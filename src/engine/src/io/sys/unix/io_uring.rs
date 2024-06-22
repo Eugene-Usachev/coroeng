@@ -3,6 +3,8 @@ use std::cell::UnsafeCell;
 use std::io::Error;
 use std::os::fd::{AsRawFd, IntoRawFd, RawFd};
 use std::{ptr};
+use std::ffi::CString;
+use std::intrinsics::unlikely;
 use io_uring::{cqueue, IoUring, opcode, squeue, types};
 use io_uring::types::{SubmitArgs, Timespec};
 use crate::buf::buffer;
@@ -10,7 +12,7 @@ use crate::io::{Selector, State};
 use crate::net::TcpStream;
 use crate::scheduler::Scheduler;
 use crate::utils::{Ptr};
-use crate::{write_ok};
+use crate::{local_scheduler, write_err, write_ok};
 
 macro_rules! handle_ret_and_get_state {
     ($ret: expr, $state_ptr: expr, $scheduler: expr, $selector: expr) => {
@@ -279,8 +281,19 @@ impl Selector for IoUringSelector {
                 opcode::Close::new(types::Fd(close_state.fd))
                     .build()
             }
-            State::Open(open_state_ptr) => unsafe {
-                todo!();
+            State::Open(open_state_ptr) => {
+                let open_how = types::OpenHow::new();
+                let dir_fd = types::Fd(libc::AT_FDCWD);
+                let cs_ = CString::new(unsafe { open_state_ptr.as_ref() }.path.clone());
+                if unlikely(cs_.is_err()) {
+                    let state = unsafe { open_state_ptr.read() };
+                    write_err!(open_state_ptr.as_mut().result, Error::new(std::io::ErrorKind::InvalidInput,
+                        format!("Invalid path. Path {:?} cannot be converted to CString", state.path)));
+                    local_scheduler().handle_coroutine_state(self, state.coroutine);
+                    return;
+                }
+                opcode::OpenAt2::new(dir_fd, unsafe { cs_.unwrap_unchecked().as_ptr() }, &open_how)
+                    .build()
             }
             State::Read(read_state_ptr) => unsafe {
                 let read_state = read_state_ptr.as_mut();
