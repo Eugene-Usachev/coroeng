@@ -1,9 +1,11 @@
 use std::io::Error;
+use crate::buf::Buffer;
 use crate::coroutine::YieldStatus;
 
 /// The AsyncWrite trait provides asynchronous write functionality for various types of data.
 /// It defines methods for writing data either [`partially`](AsyncWrite::write) or [`completely`](AsyncWrite::write_all).
-pub trait AsyncWrite<T> {
+pub trait AsyncWrite {
+    // TODO new docs, because not Result<T> and now it Buffer only
     /// Writes a data to this writer.
     ///
     /// # With [`Buffer`]
@@ -49,8 +51,9 @@ pub trait AsyncWrite<T> {
     ///     }
     /// }
     /// ```
-    fn write(&mut self, data: T, res: *mut Result<Option<T>, Error>) -> YieldStatus;
+    fn write(&mut self, data: Buffer, res: *mut Result<Buffer, Error>) -> YieldStatus;
 
+    // TODO new docs
     /// Writes all data to this writer or returns an error.
     ///
     /// # Example
@@ -72,5 +75,5 @@ pub trait AsyncWrite<T> {
     ///     // all data has been written
     /// }
     /// ```
-    fn write_all(&mut self, data: T, res: *mut Result<(), Error>) -> YieldStatus;
+    fn write_all(&mut self, data: Buffer, res: *mut Result<Buffer, Error>) -> YieldStatus;
 }

@@ -181,32 +181,32 @@ impl Scheduler {
                         selector.register(Ptr::new(state_));
                     }
 
-                    YieldStatus::TcpRead(status) => {
+                    YieldStatus::Recv(status) => {
                         let mut state_ptr = status.state_ref;
                         let state_ref = unsafe { state_ptr.as_ref() };
-                        state_ptr.rewrite_state(self.state_manager.poll_tcp(state_ref.fd(), task, status.result_ptr), self.state_manager());
+                        state_ptr.rewrite_state(self.state_manager.poll(state_ref.fd(), task, status.result_ptr), self.state_manager());
                         selector.register(state_ptr);
                     }
 
-                    YieldStatus::TcpWrite(status) => {
+                    YieldStatus::Send(status) => {
                         let mut state_ptr = status.state_ref;
                         let state_ref = unsafe { state_ptr.as_ref() };
                         let fd = state_ref.fd();
-                        state_ptr.rewrite_state(self.state_manager.write_tcp(fd, status.buffer, task, status.result_ptr), self.state_manager());
+                        state_ptr.rewrite_state(self.state_manager.send(fd, status.buffer, task, status.result_ptr), self.state_manager());
                         selector.register(state_ptr);
                     }
 
-                    YieldStatus::TcpWriteAll(status) => {
+                    YieldStatus::SendAll(status) => {
                         let mut state_ptr = status.state_ref;
                         let state_ref = unsafe { state_ptr.as_ref() };
-                        state_ptr.rewrite_state(self.state_manager.write_all_tcp(state_ref.fd(), status.buffer, task, status.result_ptr), self.state_manager());
+                        state_ptr.rewrite_state(self.state_manager.send_all(state_ref.fd(), status.buffer, task, status.result_ptr), self.state_manager());
                         selector.register(state_ptr);
                     }
 
-                    YieldStatus::TcpClose(status) => {
+                    YieldStatus::Close(status) => {
                         let mut state_ptr = status.state_ptr;
                         let state_ref = unsafe { state_ptr.as_mut() };
-                        state_ptr.rewrite_state(self.state_manager.close_tcp(state_ref.fd(), task, status.result_ptr), self.state_manager());
+                        state_ptr.rewrite_state(self.state_manager.close(state_ref.fd(), task, status.result_ptr), self.state_manager());
                         selector.register(state_ptr);
                     }
                 }

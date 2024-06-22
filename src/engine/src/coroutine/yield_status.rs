@@ -1,3 +1,4 @@
+// TODO new docs top Recv and Send and Close
 //! This module contains a description of [`YieldStatus`] for low-level work with the scheduler.
 //! Please use high-level functions for working with the scheduler if it is possible.
 use std::io::Error;
@@ -45,7 +46,7 @@ pub struct TcpAccept {
 
 /// Represents a TCP read operation.
 #[derive(Debug)]
-pub struct TcpRead {
+pub struct Recv {
     /// The state ID associated with the TCP read operation.
     pub(crate) state_ref: Ptr<State>,
     /// Pointer to store the result of the TCP read operation.
@@ -55,31 +56,31 @@ pub struct TcpRead {
 
 /// Represents a TCP write operation.
 #[derive(Debug)]
-pub struct TcpWrite {
+pub struct Send {
     /// The state ID associated with the TCP write operation.
     pub(crate) state_ref: Ptr<State>,
     /// The buffer containing data to be written.
     pub(crate) buffer: Buffer,
     /// Pointer to store the result of the TCP write operation.
     /// If success, the result will contain the number of bytes written.
-    pub(crate) result_ptr: *mut Result<Option<Buffer>, Error>,
+    pub(crate) result_ptr: *mut Result<Buffer, Error>,
 }
 
 /// Represents a TCP write all operation.
 #[derive(Debug)]
-pub struct TcpWriteAll {
+pub struct SendAll {
     /// The state ID associated with the TCP write all operation.
     pub(crate) state_ref: Ptr<State>,
     /// The buffer containing data to be written.
     pub(crate) buffer: Buffer,
     /// Pointer to store the result of the TCP write all operation.
     /// If success, the result will contain `()`.
-    pub(crate) result_ptr: *mut Result<(), Error>,
+    pub(crate) result_ptr: *mut Result<Buffer, Error>,
 }
 
 /// Represents a TCP close operation.
 #[derive(Debug)]
-pub struct TcpClose {
+pub struct Close {
     /// The state ID associated with the TCP close operation.
     pub(crate) state_ptr: Ptr<State>,
     /// Pointer to store the result of the TCP close operation.
@@ -126,7 +127,7 @@ pub enum YieldStatus {
     /// If yielded, the connection will be accepted and [`TcpStream`] will be stored in the result pointer.
     TcpAccept(TcpAccept),
 
-    /// [`TcpRead`] takes is registered to the selector, the state id, and a result pointer.
+    /// [`Recv`] takes is registered to the selector, the state id, and a result pointer.
     ///
     /// If yielded, the connection assigned to this state will be read into the inner buffer.
     /// The read result will be stored in the result pointer.
@@ -139,25 +140,25 @@ pub enum YieldStatus {
     ///
     /// The undefined behavior will occur if the buffer will be used after the next yield or return.
     ///
-    TcpRead(TcpRead),
+    Recv(Recv),
 
-    /// [`TcpWrite`] takes the state id, a buffer and a result pointer.
+    /// [`Send`] takes the state id, a buffer and a result pointer.
     ///
     /// If yielded, a part of the buffer will be written (with a single syscall) to the connection assigned to this state.
     /// The write result will be stored in the result pointer. It will store the number of bytes written to the buffer if successful.
-    TcpWrite(TcpWrite),
+    Send(Send),
 
-    /// [`TcpWriteAll`] takes the state id, a buffer and a result pointer.
+    /// [`SendAll`] takes the state id, a buffer and a result pointer.
     ///
     /// If yielded, the buffer will be written whole (maybe with multiple syscalls) to the connection assigned to this state.
     /// The write result will be stored in the result pointer.
-    TcpWriteAll(TcpWriteAll),
+    SendAll(SendAll),
 
-    /// [`TcpClose`] takes the state id.
+    /// [`Close`] takes the state id.
     /// 
     /// If yielded, the connection assigned to this state will be closed.
     /// The close result will be stored in the result pointer.
-    TcpClose(TcpClose)
+    Close(Close)
 }
 
 impl YieldStatus {
@@ -191,23 +192,23 @@ impl YieldStatus {
         YieldStatus::TcpAccept(TcpAccept { state_ptr, result_ptr })
     }
 
-    /// Create a YieldStatus variant [`TcpRead`](YieldStatus::TcpRead).
-    pub fn tcp_read(state_ref: Ptr<State>, result_ptr: *mut Result<Buffer, Error>) -> Self {
-        YieldStatus::TcpRead(TcpRead { state_ref, result_ptr })
+    /// Create a YieldStatus variant [`TcpRead`](YieldStatus::Recv).
+    pub fn recv(state_ref: Ptr<State>, result_ptr: *mut Result<Buffer, Error>) -> Self {
+        YieldStatus::Recv(Recv { state_ref, result_ptr })
     }
 
-    /// Create a YieldStatus variant [`TcpWrite`](YieldStatus::TcpWrite).
-    pub fn tcp_write(state_ref: Ptr<State>, buffer: Buffer, result_ptr: *mut Result<Option<Buffer>, Error>) -> Self {
-        YieldStatus::TcpWrite(TcpWrite { state_ref, buffer, result_ptr })
+    /// Create a YieldStatus variant [`TcpWrite`](YieldStatus::Send).
+    pub fn send(state_ref: Ptr<State>, buffer: Buffer, result_ptr: *mut Result<Buffer, Error>) -> Self {
+        YieldStatus::Send(Send { state_ref, buffer, result_ptr })
     }
 
-    /// Create a YieldStatus variant [`TcpWriteAll`](YieldStatus::TcpWriteAll).
-    pub fn tcp_write_all(state_ref: Ptr<State>, buffer: Buffer, result_ptr: *mut Result<(), Error>) -> Self {
-        YieldStatus::TcpWriteAll(TcpWriteAll { state_ref, buffer, result_ptr })
+    /// Create a YieldStatus variant [`TcpWriteAll`](YieldStatus::SendAll).
+    pub fn send_all(state_ref: Ptr<State>, buffer: Buffer, result_ptr: *mut Result<Buffer, Error>) -> Self {
+        YieldStatus::SendAll(SendAll { state_ref, buffer, result_ptr })
     }
 
-    /// Create a YieldStatus variant [`TcpClose`](YieldStatus::TcpClose).
-    pub fn tcp_close(state_ref: Ptr<State>, result_ptr: *mut Result<(), Error>) -> Self {
-        YieldStatus::TcpClose(TcpClose { state_ptr: state_ref, result_ptr })
+    /// Create a YieldStatus variant [`TcpClose`](YieldStatus::Close).
+    pub fn close(state_ref: Ptr<State>, result_ptr: *mut Result<(), Error>) -> Self {
+        YieldStatus::Close(Close { state_ptr: state_ref, result_ptr })
     }
 }

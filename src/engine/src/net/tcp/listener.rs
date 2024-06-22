@@ -139,7 +139,7 @@ impl TcpListener {
     fn close(state_ptr: Ptr<State>) {
         local_scheduler().sched(Box::pin(#[coroutine] static move || {
             let mut res_ = MaybeUninit::uninit();
-            yield YieldStatus::tcp_close(state_ptr, res_.as_mut_ptr());
+            yield YieldStatus::close(state_ptr, res_.as_mut_ptr());
             let res = unsafe { res_.assume_init() };
             
             if unlikely(res.is_err()) {

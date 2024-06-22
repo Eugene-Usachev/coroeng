@@ -96,7 +96,7 @@ impl TcpStream {
         let state_ptr = self.state_ptr;
         local_scheduler().sched(Box::pin(#[coroutine] static move || {
             let mut res_ = MaybeUninit::uninit();
-            yield YieldStatus::tcp_close(state_ptr, res_.as_mut_ptr());
+            yield YieldStatus::close(state_ptr, res_.as_mut_ptr());
             let res = unsafe { res_.assume_init() };
 
             if unlikely(res.is_err()) {
@@ -110,19 +110,19 @@ impl TcpStream {
 impl AsyncRead<Buffer> for TcpStream {
     #[inline(always)]
     fn read(&mut self, res: *mut Result<Buffer, Error>) -> YieldStatus {
-        YieldStatus::tcp_read(self.state_ptr, res)
+        YieldStatus::recv(self.state_ptr, res)
     }
 }
 
-impl AsyncWrite<Buffer> for TcpStream {
+impl AsyncWrite for TcpStream {
     #[inline(always)]
-    fn write(&mut self, data: Buffer, res: *mut Result<Option<Buffer>, Error>) -> YieldStatus {
-        YieldStatus::tcp_write(self.state_ptr, data, res)
+    fn write(&mut self, data: Buffer, res: *mut Result<Buffer, Error>) -> YieldStatus {
+        YieldStatus::send(self.state_ptr, data, res)
     }
 
     #[inline(always)]
-    fn write_all(&mut self, data: Buffer, res: *mut Result<(), Error>) -> YieldStatus {
-        YieldStatus::tcp_write_all(self.state_ptr, data, res)
+    fn write_all(&mut self, data: Buffer, res: *mut Result<Buffer, Error>) -> YieldStatus {
+        YieldStatus::send_all(self.state_ptr, data, res)
     }
 }
 

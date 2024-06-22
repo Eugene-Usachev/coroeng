@@ -8,7 +8,7 @@ use crate::coroutine::coroutine::CoroutineImpl;
 use crate::net::tcp::TcpStream;
 use crate::buf::Buffer;
 use crate::import_fd_for_os;
-use crate::utils::{bits, Ptr};
+use crate::utils::{Ptr};
 
 pub struct EmptyState {
     fd: RawFd
@@ -45,20 +45,50 @@ pub struct SendState {
     pub(crate) fd: RawFd,
     pub(crate) buffer: Buffer,
     pub(crate) coroutine: CoroutineImpl,
-    pub(crate) result: *mut Result<Option<Buffer>, Error>
+    pub(crate) result: *mut Result<Buffer, Error>
 }
 
 pub struct SendAllState {
     pub(crate) fd: RawFd,
     pub(crate) buffer: Buffer,
     pub(crate) coroutine: CoroutineImpl,
-    pub(crate) result: *mut Result<(), Error>
+    pub(crate) result: *mut Result<Buffer, Error>
 }
 
 pub struct CloseState {
     pub(crate) fd: RawFd,
     pub(crate) coroutine: CoroutineImpl,
     pub(crate) result: *mut Result<(), Error>
+}
+
+pub struct OpenState {
+    pub(crate) path: String,
+    pub(crate) coroutine: CoroutineImpl,
+    pub(crate) result: *mut Result<RawFd, Error>
+}
+
+pub struct ReadState {
+    pub(crate) fd: RawFd,
+    pub(crate) buffer: Buffer,
+    pub(crate) offset: usize,
+    pub(crate) coroutine: CoroutineImpl,
+    pub(crate) result: *mut Result<Buffer, Error>
+}
+
+pub struct WriteState {
+    pub(crate) fd: RawFd,
+    pub(crate) buffer: Buffer,
+    pub(crate) offset: usize,
+    pub(crate) coroutine: CoroutineImpl,
+    pub(crate) result: *mut Result<Buffer, Error>
+}
+
+pub struct WriteAllState {
+    pub(crate) fd: RawFd,
+    pub(crate) buffer: Buffer,
+    pub(crate) offset: usize,
+    pub(crate) coroutine: CoroutineImpl,
+    pub(crate) result: *mut Result<Buffer, Error>
 }
 
 // TODO Update for not box
@@ -87,7 +117,7 @@ pub enum State {
     /// This method will lead to one syscall. Only the part of the buffer will be written.
     /// The number of bytes written will be stored in the result variable.
     Send(Ptr<SendState>),
-    /// Tells the selector that [`SendAllState`](crate::io::SendAllState) or another writable [`State`] is ready.
+    /// Tells the selector that [`SendAllState`](SendAllState) or another writable [`State`] is ready.
     /// So, this method returns before the write syscall is done. The writing will be done in [`Selector::poll`].
     ///
     /// # Panics
@@ -98,31 +128,43 @@ pub enum State {
     ///
     /// This method can lead to one or more syscalls.
     SendAll(Ptr<SendAllState>),
-    Close(Ptr<CloseState>)
+    Close(Ptr<CloseState>),
+    Open(Ptr<OpenState>),
+    Read(Ptr<ReadState>),
+    Write(Ptr<WriteState>),
+    WriteAll(Ptr<WriteAllState>)
 }
 
 pub struct StateManager {
     state_ptr_pool: Vec<Ptr<State>>,
-    accept_tcp_pool: Vec<Ptr<AcceptTcpState>>,
-    connect_tcp_pool: Vec<Ptr<ConnectTcpState>>,
-    poll_tcp_pool: Vec<Ptr<PollState>>,
-    read_tcp_pool: Vec<Ptr<RecvState>>,
-    write_tcp_pool: Vec<Ptr<SendState>>,
-    write_all_tcp_pool: Vec<Ptr<SendAllState>>,
-    close_tcp_pool: Vec<Ptr<CloseState>>
+    accept_tcp_state_pool: Vec<Ptr<AcceptTcpState>>,
+    connect_tcp_state_pool: Vec<Ptr<ConnectTcpState>>,
+    poll_state_pool: Vec<Ptr<PollState>>,
+    recv_state_pool: Vec<Ptr<RecvState>>,
+    send_state_pool: Vec<Ptr<SendState>>,
+    send_state_all_pool: Vec<Ptr<SendAllState>>,
+    close_state_pool: Vec<Ptr<CloseState>>,
+    open_state_pool: Vec<Ptr<OpenState>>,
+    read_state_pool: Vec<Ptr<ReadState>>,
+    write_state_pool: Vec<Ptr<WriteState>>,
+    write_all_state_pool: Vec<Ptr<WriteAllState>>
 }
 
 impl StateManager {
     pub fn new() -> Self {
         Self {
             state_ptr_pool: Vec::new(),
-            accept_tcp_pool: Vec::new(),
-            connect_tcp_pool: Vec::new(),
-            poll_tcp_pool: Vec::new(),
-            read_tcp_pool: Vec::new(),
-            write_tcp_pool: Vec::new(),
-            write_all_tcp_pool: Vec::new(),
-            close_tcp_pool: Vec::new()
+            accept_tcp_state_pool: Vec::new(),
+            connect_tcp_state_pool: Vec::new(),
+            poll_state_pool: Vec::new(),
+            recv_state_pool: Vec::new(),
+            send_state_pool: Vec::new(),
+            send_state_all_pool: Vec::new(),
+            close_state_pool: Vec::new(),
+            open_state_pool: Vec::new(),
+            read_state_pool: Vec::new(),
+            write_state_pool: Vec::new(),
+            write_all_state_pool: Vec::new()
         }
     }
     
@@ -143,13 +185,17 @@ impl StateManager {
     pub fn put_state(&mut self, state: State) {
         match state {
             State::Empty(_) => {}
-            State::AcceptTcp(state) => self.accept_tcp_pool.push(state),
-            State::ConnectTcp(state) => self.connect_tcp_pool.push(state),
-            State::Poll(state) => self.poll_tcp_pool.push(state),
-            State::Recv(state) => self.read_tcp_pool.push(state),
-            State::Send(state) => self.write_tcp_pool.push(state),
-            State::SendAll(state) => self.write_all_tcp_pool.push(state),
-            State::Close(state) => self.close_tcp_pool.push(state)
+            State::AcceptTcp(state) => self.accept_tcp_state_pool.push(state),
+            State::ConnectTcp(state) => self.connect_tcp_state_pool.push(state),
+            State::Poll(state) => self.poll_state_pool.push(state),
+            State::Recv(state) => self.recv_state_pool.push(state),
+            State::Send(state) => self.send_state_pool.push(state),
+            State::SendAll(state) => self.send_state_all_pool.push(state),
+            State::Close(state) => self.close_state_pool.push(state),
+            State::Open(state) => self.open_state_pool.push(state),
+            State::Read(state) => self.read_state_pool.push(state),
+            State::Write(state) => self.write_state_pool.push(state),
+            State::WriteAll(state) => self.write_all_state_pool.push(state),
         }
     }
     
@@ -160,7 +206,7 @@ impl StateManager {
     
     #[inline(always)]
     pub fn accept_tcp(&mut self, fd: RawFd, coroutine: CoroutineImpl, result: *mut Result<TcpStream, Error>) -> State {
-        match self.accept_tcp_pool.pop() {
+        match self.accept_tcp_state_pool.pop() {
             Some(state) => unsafe {
                 state.write(AcceptTcpState { fd, coroutine, result });
                 State::AcceptTcp(state)
@@ -173,8 +219,7 @@ impl StateManager {
     
     #[inline(always)]
     pub fn connect_tcp(&mut self, address: SockAddr, socket: Socket, coroutine: CoroutineImpl, result: *mut Result<TcpStream, Error>) -> State {
-
-        match self.connect_tcp_pool.pop() {
+        match self.connect_tcp_state_pool.pop() {
             Some(state) => unsafe {
                 state.write(ConnectTcpState { address, socket, coroutine, result });
                 State::ConnectTcp(state)
@@ -186,9 +231,8 @@ impl StateManager {
     }
     
     #[inline(always)]
-    pub fn poll_tcp(&mut self, fd: RawFd, coroutine: CoroutineImpl, result: *mut Result<Buffer, Error>) -> State {
-
-        match self.poll_tcp_pool.pop() {
+    pub fn poll(&mut self, fd: RawFd, coroutine: CoroutineImpl, result: *mut Result<Buffer, Error>) -> State {
+        match self.poll_state_pool.pop() {
             Some(state) => unsafe {
                 state.write(PollState { fd, coroutine, result });
                 State::Poll(state)
@@ -200,9 +244,8 @@ impl StateManager {
     }
     
     #[inline(always)]
-    pub fn read_tcp(&mut self, fd: RawFd, buffer: Buffer, coroutine: CoroutineImpl, result: *mut Result<Buffer, Error>) -> State {
-
-        match self.read_tcp_pool.pop() {
+    pub fn recv(&mut self, fd: RawFd, buffer: Buffer, coroutine: CoroutineImpl, result: *mut Result<Buffer, Error>) -> State {
+        match self.recv_state_pool.pop() {
             Some(state) => unsafe {
                 state.write(RecvState { fd, buffer, coroutine, result });
                 State::Recv(state)
@@ -214,9 +257,8 @@ impl StateManager {
     }
     
     #[inline(always)]
-    pub fn write_tcp(&mut self, fd: RawFd, buffer: Buffer, coroutine: CoroutineImpl, result: *mut Result<Option<Buffer>, Error>) -> State {
-
-        match self.write_tcp_pool.pop() {
+    pub fn send(&mut self, fd: RawFd, buffer: Buffer, coroutine: CoroutineImpl, result: *mut Result<Buffer, Error>) -> State {
+        match self.send_state_pool.pop() {
             Some(state) => unsafe {
                 state.write(SendState { fd, buffer, coroutine, result });
                 State::Send(state)
@@ -228,9 +270,8 @@ impl StateManager {
     }
     
     #[inline(always)]
-    pub fn write_all_tcp(&mut self, fd: RawFd, buffer: Buffer, coroutine: CoroutineImpl, result: *mut Result<(), Error>) -> State {
-
-        match self.write_all_tcp_pool.pop() {
+    pub fn send_all(&mut self, fd: RawFd, buffer: Buffer, coroutine: CoroutineImpl, result: *mut Result<Buffer, Error>) -> State {
+        match self.send_state_all_pool.pop() {
             Some(state) => unsafe {
                 state.write(SendAllState { fd, buffer, coroutine, result });
                 State::SendAll(state)
@@ -242,9 +283,9 @@ impl StateManager {
     }
     
     #[inline(always)]
-    pub fn close_tcp(&mut self, fd: RawFd, coroutine: CoroutineImpl, result: *mut Result<(), Error>) -> State {
+    pub fn close(&mut self, fd: RawFd, coroutine: CoroutineImpl, result: *mut Result<(), Error>) -> State {
 
-        match self.close_tcp_pool.pop() {
+        match self.close_state_pool.pop() {
             Some(state) => unsafe {
                 state.write(CloseState { fd, coroutine, result });
                 State::Close(state)
@@ -254,15 +295,64 @@ impl StateManager {
             }
         }
     }
+    
+    #[inline(always)]
+    pub fn open(&mut self, path: String, coroutine: CoroutineImpl, result: *mut Result<RawFd, Error>) -> State {
+        match self.open_state_pool.pop() {
+            Some(state) => unsafe {
+                state.write(OpenState { path, coroutine, result });
+                State::Open(state)
+            }
+            None => {
+                State::Open(Ptr::new(OpenState { path, coroutine, result }))
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub fn read(&mut self, fd: RawFd, buffer: Buffer, offset: usize, coroutine: CoroutineImpl, result: *mut Result<Buffer, Error>) -> State {
+        match self.read_state_pool.pop() {
+            Some(state) => unsafe {
+                state.write(ReadState { fd, buffer, offset, coroutine, result });
+                State::Read(state)
+            }
+            None => {
+                State::Read(Ptr::new(ReadState { fd, buffer, offset, coroutine, result }))
+            }
+        }
+    }
+    
+    #[inline(always)]
+    pub fn write(&mut self, fd: RawFd, buffer: Buffer, offset: usize, coroutine: CoroutineImpl, result: *mut Result<Buffer, Error>) -> State {
+        match self.write_state_pool.pop() {
+            Some(state) => unsafe {
+                state.write(WriteState { fd, buffer, offset, coroutine, result });
+                State::Write(state)
+            }
+            None => {
+                State::Write(Ptr::new(WriteState { fd, buffer, offset, coroutine, result }))
+            }
+        }
+    }
+    
+    #[inline(always)]
+    pub fn write_all(&mut self, fd: RawFd, buffer: Buffer, offset: usize, coroutine: CoroutineImpl, result: *mut Result<Buffer, Error>) -> State {
+        match self.write_all_state_pool.pop() {
+            Some(state) => unsafe {
+                state.write(WriteAllState { fd, buffer, offset, coroutine, result });
+                State::WriteAll(state)
+            }
+            None => {
+                State::WriteAll(Ptr::new(WriteAllState { fd, buffer, offset, coroutine, result }))
+            }
+        }
+    }
 }
 
-macro_rules! generate_fd_with_flag_and_set_fd {
+macro_rules! generate_fd {
     ($($state:ident,)*) => {
-        /// Get the file descriptor associated with this state and `is_registered` flag. Not all states have a file descriptor.
-        ///
-        /// All fd in states use first bit for `is_registered` flag. 
-        /// Be careful when using it, better call methods [`is_registered`](#method.is_registered) and [`fd`](#method.fd).
-        pub fn fd_with_flag(&self) -> RawFd {
+        /// Get the file descriptor associated with this state.
+        pub fn fd(&self) -> RawFd {
             match self {
                 State::Empty(state) => { state.fd }
                 $(
@@ -271,45 +361,20 @@ macro_rules! generate_fd_with_flag_and_set_fd {
                 _ => { panic!("[BUG] tried to get fd from {self:?} token") }
             }
         }
-        
-        /// Set the `is_registered` flag to true for this state.
-        pub fn set_is_registered_true(&mut self) {
-            match self {
-                State::Empty(state) => { 
-                    state.fd = bits::set_msb(state.fd)
-                }
-                $(
-                    State::$state(state_ptr) => unsafe {
-                        let state_ref = state_ptr.as_mut();
-                        state_ref.fd = bits::set_msb(state_ref.fd)
-                    }
-                )*
-                _ => { panic!("[BUG] tried to get fd from {self:?} token") }
-            }
-        }
     };
 }
 
 impl State {
-    generate_fd_with_flag_and_set_fd! {
+    generate_fd! {
         AcceptTcp,
         Poll,
         Recv,
         Send,
         SendAll,
         Close,
-    }
-    
-    /// Get the file descriptor associated with this state.
-    #[inline(always)]
-    pub fn fd(&self) -> RawFd {
-        bits::clear_msb(self.fd_with_flag())
-    }
-    
-    /// Get the `is_registered` flag associated with this state.
-    #[inline(always)]
-    pub fn is_registered(&self) -> bool {
-        bits::get_msb(self.fd_with_flag())
+        Read,
+        Write,
+        WriteAll,
     }
 
     #[inline(always)]
@@ -347,6 +412,10 @@ impl Debug for State {
             State::Send(state) => unsafe { write!(f, "Send, fd: {:?}", state.as_ref().fd) }
             State::SendAll(state) => unsafe { write!(f, "SendAll, fd: {:?}", state.as_ref().fd) }
             State::Close(state) => unsafe { write!(f, "Close, fd: {:?}", state.as_ref().fd) }
+            State::Open(state) => unsafe { write!(f, "Open, path: {:?}", state.as_ref().path) }
+            State::Read(state) => unsafe { write!(f, "Read, fd: {:?}", state.as_ref().fd) }
+            State::Write(state) => unsafe { write!(f, "Write, fd: {:?}", state.as_ref().fd) }
+            State::WriteAll(state) => unsafe { write!(f, "WriteAll, fd: {:?}", state.as_ref().fd) }
         }
     }
 }
