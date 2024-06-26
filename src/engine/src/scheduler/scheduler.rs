@@ -254,6 +254,14 @@ impl Scheduler {
                         state_ptr.rewrite_state(self.state_manager.close(state_ref.fd(), task, status.result_ptr), self.state_manager());
                         selector.register(state_ptr);
                     }
+                    
+                    YieldStatus::RemoveFile(status) => {
+                        todo!();
+                    }
+                    
+                    YieldStatus::RemoveDir(status) => {
+                        todo!();
+                    }
                 }
             }
             CoroutineState::Complete(_) => {}

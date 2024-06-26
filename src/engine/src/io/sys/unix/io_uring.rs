@@ -253,6 +253,20 @@ impl IoUringSelector {
                 write_ok!(state.result, ());
                 scheduler.handle_coroutine_state(self, state.coroutine)
             }
+
+            State::RemoveFile(remove_file_ptr) => {
+                let state = handle_ret_and_get_state!(ret, remove_file_ptr, scheduler, self);
+
+                write_ok!(state.result, ());
+                scheduler.handle_coroutine_state(self, state.coroutine)
+            }
+
+            State::RemoveDir(remove_file_ptr) => {
+                let state = handle_ret_and_get_state!(ret, remove_file_ptr, scheduler, self);
+
+                write_ok!(state.result, ());
+                scheduler.handle_coroutine_state(self, state.coroutine)
+            }
         }
     }
 }
@@ -385,6 +399,33 @@ impl Selector for IoUringSelector {
             State::Close(close_state_ptr) => unsafe {
                 let close_state = close_state_ptr.as_ref();
                 opcode::Close::new(types::Fd(close_state.fd))
+                    .build()
+            }
+
+            State::RemoveFile(remove_state_ptr) => unsafe {
+                let remove_state = remove_state_ptr.as_ref();
+                if remove_state.path.is_err() {
+                    let open_state = remove_state_ptr.read();
+                    write_err!(open_state.result, open_state.path.unwrap_err_unchecked());
+                    local_scheduler().handle_coroutine_state(self, open_state.coroutine);
+                    return;
+                }
+                let cs = remove_state.path.as_ref().unwrap_unchecked();
+                opcode::UnlinkAt::new(types::Fd(libc::AT_FDCWD), cs.as_ptr())
+                    .build()
+            }
+
+            State::RemoveDir(remove_state_ptr) => unsafe {
+                let remove_state = remove_state_ptr.as_ref();
+                if remove_state.path.is_err() {
+                    let open_state = remove_state_ptr.read();
+                    write_err!(open_state.result, open_state.path.unwrap_err_unchecked());
+                    local_scheduler().handle_coroutine_state(self, open_state.coroutine);
+                    return;
+                }
+                let cs = remove_state.path.as_ref().unwrap_unchecked();
+                opcode::UnlinkAt::new(types::Fd(libc::AT_FDCWD), cs.as_ptr())
+                    .flags(libc::AT_REMOVEDIR)
                     .build()
             }
         };

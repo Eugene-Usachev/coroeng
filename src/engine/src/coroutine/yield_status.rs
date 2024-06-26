@@ -1,8 +1,10 @@
 // TODO new docs top Recv and Send and Close
 //! This module contains a description of [`YieldStatus`] for low-level work with the scheduler.
 //! Please use high-level functions for working with the scheduler if it is possible.
+use std::fmt::{Debug, Formatter};
 use std::io::Error;
 use std::net::SocketAddr;
+use std::path::Path;
 use std::time::Duration;
 use crate::io::State;
 use crate::net::{TcpListener, TcpStream};
@@ -10,6 +12,19 @@ use crate::buf::{Buffer};
 use crate::fs::file::File;
 use crate::fs::OpenOptions;
 use crate::utils::Ptr;
+
+macro_rules! impl_debug_for_as_ref_path {
+    ($t:ty, $name:expr) => {
+        impl Debug for $t {
+            fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+                let path = self.path.as_ref().as_ref();
+                f.debug_struct($name)
+                    .field("path", &path)
+                    .finish()
+            }
+        }
+    };
+}
 
 /// Contains all necessary information for create a new TCP listener.
 #[derive(Debug)]
@@ -76,16 +91,18 @@ pub struct SendAll {
 }
 
 /// Contains all necessary information for an open file operation.
-#[derive(Debug)]
 pub struct OpenFile {
     /// Path to the file.
-    pub(crate) path: String,
+    pub(crate) path: Box<dyn AsRef<Path>>,
     /// Options for opening the file.
     pub(crate) options: OpenOptions,
     /// Pointer to store the result of the open file operation.
     /// If success, the result will contain [`File`].
     pub(crate) file_ptr: *mut Result<File, Error>,
 }
+
+impl_debug_for_as_ref_path!(OpenFile, "OpenFile");
+
 /// Contains all necessary information for a read operation without an offset.
 #[derive(Debug)]
 pub struct Read {
@@ -163,6 +180,7 @@ pub struct PWriteAll {
     /// (read [`Buffer`] or [`Buffer::offset`] description for more information).
     pub(crate) result_ptr: *mut Result<Buffer, Error>,
 }
+
 /// Contains all necessary information for a close operation.
 #[derive(Debug)]
 pub struct Close {
@@ -172,6 +190,22 @@ pub struct Close {
     /// If success, the result will contain `()`.
     pub(crate) result_ptr: *mut Result<(), Error>,
 }
+
+// TODO docs
+pub struct RemoveFile {
+    pub(crate) path: Box<dyn AsRef<Path>>,
+    pub(crate) result_ptr: *mut Result<(), Error>,
+}
+
+impl_debug_for_as_ref_path!(RemoveFile, "RemoveFile");
+
+// TODO docs
+pub struct RemoveDir {
+    pub(crate) path: Box<dyn AsRef<Path>>,
+    pub(crate) result_ptr: *mut Result<(), Error>,
+}
+
+impl_debug_for_as_ref_path!(RemoveDir, "RemoveDir");
 
 /// The status of the coroutine yield. This is the one way to communicate with the scheduler.
 /// It uses instead of await for async programming, and uses for creating new coroutines and for let the scheduler wake other coroutines up.
@@ -278,7 +312,13 @@ pub enum YieldStatus {
     /// 
     /// If yielded, the closable structure assigned to this state will be closed.
     /// The close result will be stored in the result pointer.
-    Close(Close)
+    Close(Close),
+    
+    // TODO docs
+    RemoveFile(RemoveFile),
+
+    // TODO docs
+    RemoveDir(RemoveDir),
 }
 
 impl YieldStatus {
@@ -323,7 +363,7 @@ impl YieldStatus {
     }
     
     /// Create a YieldStatus variant [`OpenFile`](YieldStatus::OpenFile).
-    pub fn open_file(path: String, options: OpenOptions, result_ptr: *mut Result<File, Error>) -> Self {
+    pub fn open_file(path: Box<dyn AsRef<Path>>, options: OpenOptions, result_ptr: *mut Result<File, Error>) -> Self {
         YieldStatus::OpenFile(OpenFile { path, options, file_ptr: result_ptr })
     }
     
@@ -360,5 +400,15 @@ impl YieldStatus {
     /// Create a YieldStatus variant [`TcpClose`](YieldStatus::Close).
     pub fn close(state_ref: Ptr<State>, result_ptr: *mut Result<(), Error>) -> Self {
         YieldStatus::Close(Close { state_ptr: state_ref, result_ptr })
+    }
+    
+    // TODO docs
+    pub fn remove_file(path: Box<dyn AsRef<Path>>, result_ptr: *mut Result<(), Error>) -> Self {
+        YieldStatus::RemoveFile(RemoveFile { path, result_ptr })
+    }
+    
+    // TODO docs
+    pub fn remove_dir(path: Box<dyn AsRef<Path>>, result_ptr: *mut Result<(), Error>) -> Self {
+        YieldStatus::RemoveDir(RemoveDir { path, result_ptr })
     }
 }

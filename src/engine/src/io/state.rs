@@ -12,7 +12,7 @@ use crate::net::tcp::TcpStream;
 use crate::buf::Buffer;
 use crate::fs::{File, OpenOptions};
 use crate::import_fd_for_os;
-use crate::utils::{Ptr};
+use crate::utils::{path_to_c_string, Ptr};
 
 pub struct EmptyState {
     fd: RawFd
@@ -118,6 +118,12 @@ pub struct CloseState {
     pub(crate) result: *mut Result<(), Error>
 }
 
+pub struct RemoveState {
+    pub(crate) path: std::io::Result<CString>,
+    pub(crate) coroutine: CoroutineImpl,
+    pub(crate) result: *mut Result<(), Error>
+}
+
 // TODO Update for not box
 /// # Why using [`Box`]?
 ///
@@ -163,6 +169,8 @@ pub enum State {
     PWrite(Ptr<PWriteState>),
     PWriteAll(Ptr<PWriteAllState>),
     Close(Ptr<CloseState>),
+    RemoveFile(Ptr<RemoveState>),
+    RemoveDir(Ptr<RemoveState>),
 }
 
 pub struct StateManager {
@@ -181,6 +189,7 @@ pub struct StateManager {
     pwrite_state_pool: Vec<Ptr<PWriteState>>,
     pwrite_all_state_pool: Vec<Ptr<PWriteAllState>>,
     close_state_pool: Vec<Ptr<CloseState>>,
+    remove_state_pool: Vec<Ptr<RemoveState>>,
 }
 
 impl StateManager {
@@ -200,6 +209,7 @@ impl StateManager {
             pread_state_pool: Vec::new(),
             pwrite_state_pool: Vec::new(),
             pwrite_all_state_pool: Vec::new(),
+            remove_state_pool: Vec::new(),
             close_state_pool: Vec::new()
         }
     }
@@ -234,6 +244,8 @@ impl StateManager {
             State::PRead(state) => self.pread_state_pool.push(state),
             State::PWrite(state) => self.pwrite_state_pool.push(state),
             State::PWriteAll(state) => self.pwrite_all_state_pool.push(state),
+            State::RemoveFile(state) => self.remove_state_pool.push(state),
+            State::RemoveDir(state) => self.remove_state_pool.push(state),
             State::Close(state) => self.close_state_pool.push(state),
         }
     }
@@ -322,11 +334,8 @@ impl StateManager {
     }
 
     #[inline(always)]
-    pub fn open(&mut self, path: impl AsRef<Path>, options: OpenOptions, coroutine: CoroutineImpl, result: *mut Result<File, Error>) -> State {
-        let path = match CString::new(path.as_ref().as_os_str().as_encoded_bytes()) {
-            Ok(path) => Ok(path),
-            Err(_) => Err(Error::new(ErrorKind::InvalidInput, "file name contained an unexpected NUL byte")),
-        };
+    pub fn open(&mut self, path: Box<dyn AsRef<Path>>, options: OpenOptions, coroutine: CoroutineImpl, result: *mut Result<File, Error>) -> State {
+        let path = path_to_c_string(path.as_ref());
         match self.open_state_pool.pop() {
             Some(state) => unsafe {
                 state.write(OpenState { path, options: options.into_os_options(), coroutine, result });
@@ -415,7 +424,7 @@ impl StateManager {
             }
         }
     }
-    
+
     #[inline(always)]
     pub fn close(&mut self, fd: RawFd, coroutine: CoroutineImpl, result: *mut Result<(), Error>) -> State {
 
@@ -426,6 +435,36 @@ impl StateManager {
             }
             None => {
                 State::Close(Ptr::new(CloseState { fd, coroutine, result }))
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub fn remove_file(&mut self, path: impl AsRef<Path>, coroutine: CoroutineImpl, result: *mut Result<(), Error>) -> State {
+        let path = path_to_c_string(path);
+
+        match self.remove_state_pool.pop() {
+            Some(state) => unsafe {
+                state.write(RemoveState { path, coroutine, result });
+                State::RemoveFile(state)
+            }
+            None => {
+                State::RemoveFile(Ptr::new(RemoveState { path, coroutine, result }))
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub fn remove_dir(&mut self, path: impl AsRef<Path>, coroutine: CoroutineImpl, result: *mut Result<(), Error>) -> State {
+        let path = path_to_c_string(path);
+
+        match self.remove_state_pool.pop() {
+            Some(state) => unsafe {
+                state.write(RemoveState { path, coroutine, result });
+                State::RemoveDir(state)
+            }
+            None => {
+                State::RemoveDir(Ptr::new(RemoveState { path, coroutine, result }))
             }
         }
     }
@@ -502,17 +541,19 @@ impl Debug for State {
             State::WriteAll(state_ptr) => unsafe { write!(f, "WriteAll, fd: {:?}", state_ptr.as_ref().fd) }
             State::PRead(state_ptr) => unsafe {
                 let state_ref = state_ptr.as_ref();
-                write!(f, "PRead, fd: {:?}, offset: {}", state_ref.fd, state_ref.offset) 
+                write!(f, "PRead, fd: {:?}, offset: {}", state_ref.fd, state_ref.offset)
             }
             State::PWrite(state_ptr) => unsafe {
                 let state_ref = state_ptr.as_ref();
-                write!(f, "PWrite, fd: {:?}, offset: {}", state_ref.fd, state_ref.offset) 
+                write!(f, "PWrite, fd: {:?}, offset: {}", state_ref.fd, state_ref.offset)
             }
-            State::PWriteAll(state_ptr) => unsafe { 
+            State::PWriteAll(state_ptr) => unsafe {
                 let state_ref = state_ptr.as_ref();
                 write!(f, "PWriteAll, fd: {:?}, offset: {}", state_ref.fd, state_ref.offset)
             }
             State::Close(state_ptr) => unsafe { write!(f, "Close, fd: {:?}", state_ptr.as_ref().fd) }
+            State::RemoveFile(state_ptr) => unsafe { write!(f, "RemoveFile, path: {:?}", state_ptr.as_ref().path) }
+            State::RemoveDir(state_ptr) => unsafe { write!(f, "RemoveDir, path: {:?}", state_ptr.as_ref().path) }
         }
     }
 }
