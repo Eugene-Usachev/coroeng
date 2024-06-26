@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::cell::UnsafeCell;
 use std::io::Error;
-use std::os::fd::{AsRawFd, IntoRawFd, RawFd};
+use std::os::fd::{AsRawFd, IntoRawFd};
 use std::{ptr};
 use std::ffi::CString;
 use std::intrinsics::unlikely;
@@ -13,6 +13,7 @@ use crate::net::TcpStream;
 use crate::scheduler::Scheduler;
 use crate::utils::{Ptr};
 use crate::{local_scheduler, write_err, write_ok};
+use crate::fs::File;
 
 macro_rules! handle_ret_and_get_state {
     ($ret: expr, $state_ptr: expr, $scheduler: expr, $selector: expr) => {
@@ -175,16 +176,13 @@ impl IoUringSelector {
                     self.register(ptr);
                 }
             }
-            
-            State::Close(close_state_ptr) => {
-                let state = handle_ret_and_get_state!(ret, close_state_ptr, scheduler, self);
-                
-                write_ok!(state.result, ());
-                scheduler.handle_coroutine_state(self, state.coroutine)
-            }
 
             State::Open(open_state_ptr) => {
-                todo!();
+                let state = handle_ret_and_get_state!(ret, open_state_ptr, scheduler, self);
+                let mut new_state_ptr = scheduler.get_state_ptr();
+                new_state_ptr.rewrite_state(scheduler.state_manager().empty(ret), scheduler.state_manager());
+                write_ok!(state.result, File::from_state_ptr(new_state_ptr));
+                scheduler.handle_coroutine_state(self, state.coroutine)
             }
 
             State::Read(read_state_ptr) => {
@@ -212,10 +210,48 @@ impl IoUringSelector {
                     scheduler.handle_coroutine_state(self, state.coroutine)
                 } else {
                     state.buffer.set_offset(state.buffer.offset() + ret as usize);
-                    ptr.rewrite_state(scheduler.state_manager().write_all(state.fd, state.buffer, state.offset + ret as usize, state.coroutine, state.result), scheduler.state_manager());
+                    ptr.rewrite_state(scheduler.state_manager().write_all(state.fd, state.buffer, state.coroutine, state.result), scheduler.state_manager());
 
                     self.register(ptr);
                 }
+            }
+
+            State::PRead(pread_state_ptr) => {
+                let mut state = handle_ret_and_get_state!(ret, pread_state_ptr, scheduler, self);
+
+                state.buffer.add_len(ret as usize);
+                write_ok!(state.result, state.buffer);
+                scheduler.handle_coroutine_state(self, state.coroutine)
+            }
+
+            State::PWrite(pwrite_state_ptr) => {
+                let mut state = handle_ret_and_get_state!(ret, pwrite_state_ptr, scheduler, self);
+
+                state.buffer.add_offset(ret as usize);
+                write_ok!(state.result, state.buffer);
+                scheduler.handle_coroutine_state(self, state.coroutine)
+            }
+
+            State::PWriteAll(pwrite_all_state_ptr) => {
+                let mut state = handle_ret_and_get_state!(ret, pwrite_all_state_ptr, scheduler, self);
+
+                if ret as usize == state.buffer.len() {
+                    state.buffer.set_offset_to_len();
+                    write_ok!(state.result, state.buffer);
+                    scheduler.handle_coroutine_state(self, state.coroutine)
+                } else {
+                    state.buffer.set_offset(state.buffer.offset() + ret as usize);
+                    ptr.rewrite_state(scheduler.state_manager().pwrite_all(state.fd, state.buffer, state.offset + ret as usize, state.coroutine, state.result), scheduler.state_manager());
+
+                    self.register(ptr);
+                }
+            }
+
+            State::Close(close_state_ptr) => {
+                let state = handle_ret_and_get_state!(ret, close_state_ptr, scheduler, self);
+                
+                write_ok!(state.result, ());
+                scheduler.handle_coroutine_state(self, state.coroutine)
             }
         }
     }
@@ -247,70 +283,108 @@ impl Selector for IoUringSelector {
 
         let mut entry = match state {
             State::Empty(_) => { panic!("[BUG] tried to register an empty state in [`IoUringSelector`]. Please report this issue.") }
+
             State::AcceptTcp(accept_tcp_state_ptr) => unsafe {
                 opcode::Accept::new(types::Fd(accept_tcp_state_ptr.as_ref().fd), ptr::null_mut(), ptr::null_mut())
                     .build()
             }
+
             State::ConnectTcp(connect_tcp_state_ptr) => unsafe {
                 let connect_tcp_state = connect_tcp_state_ptr.as_ref();
                 opcode::Connect::new(types::Fd(connect_tcp_state.socket.as_raw_fd()), connect_tcp_state.address.as_ptr(), connect_tcp_state.address.len())
                     .build()
             }
+
             State::Poll(poll_state_ptr) => unsafe {
                 let poll_state = poll_state_ptr.as_ref();
                 opcode::PollAdd::new(types::Fd(poll_state.fd), libc::POLLIN as _)
                     .build()
             }
+
             State::Recv(recv_state_ptr) => unsafe {
                 let recv_state = recv_state_ptr.as_mut();
                 opcode::Recv::new(types::Fd(recv_state.fd), recv_state.buffer.as_mut_ptr(), recv_state.buffer.cap() as _)
                     .build()
             }
+
             State::Send(send_state_ptr) => unsafe {
                 let send_state = send_state_ptr.as_ref();
                 opcode::Send::new(types::Fd(send_state.fd), send_state.buffer.as_ptr(), send_state.buffer.len() as _)
                     .build()
             }
+
             State::SendAll(send_all_state_ptr) => unsafe {
                 let send_all_state = send_all_state_ptr.as_ref();
                 opcode::Send::new(types::Fd(send_all_state.fd), send_all_state.buffer.as_ptr(), send_all_state.buffer.len() as _)
                     .build()
             }
-            State::Close(close_state_ptr) => unsafe {
-                let close_state = close_state_ptr.as_ref();
-                opcode::Close::new(types::Fd(close_state.fd))
-                    .build()
-            }
+
             State::Open(open_state_ptr) => {
-                let open_how = types::OpenHow::new();
+                let open_state = unsafe { open_state_ptr.as_mut() };
                 let dir_fd = types::Fd(libc::AT_FDCWD);
-                let cs_ = CString::new(unsafe { open_state_ptr.as_ref() }.path.clone());
-                if unlikely(cs_.is_err()) {
-                    let state = unsafe { open_state_ptr.read() };
-                    write_err!(open_state_ptr.as_mut().result, Error::new(std::io::ErrorKind::InvalidInput,
-                        format!("Invalid path. Path {:?} cannot be converted to CString", state.path)));
-                    local_scheduler().handle_coroutine_state(self, state.coroutine);
+                
+                if open_state.options.is_err() {
+                    let open_state = unsafe { open_state_ptr.read() };
+                    write_err!(open_state.result, open_state.options.unwrap_err_unchecked());
+                    local_scheduler().handle_coroutine_state(self, open_state.coroutine);
                     return;
                 }
-                opcode::OpenAt2::new(dir_fd, unsafe { cs_.unwrap_unchecked().as_ptr() }, &open_how)
+                let open_how = unsafe { open_state.options.as_ref().unwrap_unchecked() };
+                
+                if open_state.path.is_err() {
+                    let open_state = unsafe { open_state_ptr.read() };
+                    write_err!(open_state.result, open_state.path.unwrap_err_unchecked());
+                    local_scheduler().handle_coroutine_state(self, open_state.coroutine);
+                    return;
+                }
+                let cs = unsafe { open_state.path.as_ref().unwrap_unchecked() };
+               
+                opcode::OpenAt2::new(dir_fd, cs.as_ptr(), open_how)
                     .build()
             }
+
             State::Read(read_state_ptr) => unsafe {
                 let read_state = read_state_ptr.as_mut();
                 opcode::Read::new(types::Fd(read_state.fd), read_state.buffer.as_mut_ptr(), read_state.buffer.cap() as _)
-                    .offset(read_state.offset as _)
                     .build()
             }
+
             State::Write(write_state_ptr) => unsafe {
                 let write_state = write_state_ptr.as_ref();
                 opcode::Write::new(types::Fd(write_state.fd), write_state.buffer.as_ptr(), write_state.buffer.len() as _)
-                    .offset(write_state.offset as _)
                     .build()
             }
+
             State::WriteAll(write_all_state_ptr) => unsafe {
                 let write_all_state = write_all_state_ptr.as_ref();
                 opcode::Write::new(types::Fd(write_all_state.fd), write_all_state.buffer.as_ptr(), write_all_state.buffer.len() as _)
-                    .offset(write_all_state.offset as _)
+                    .build()
+            }
+
+            State::PRead(pread_state_ptr) => unsafe {
+                let pread_state = pread_state_ptr.as_mut();
+                opcode::Read::new(types::Fd(pread_state.fd), pread_state.buffer.as_mut_ptr(), pread_state.buffer.cap() as _)
+                    .offset(pread_state.offset as _)
+                    .build()
+            }
+
+            State::PWrite(pwrite_state_ptr) => unsafe {
+                let pwrite_state = pwrite_state_ptr.as_ref();
+                opcode::Write::new(types::Fd(pwrite_state.fd), pwrite_state.buffer.as_ptr(), pwrite_state.buffer.len() as _)
+                    .offset(pwrite_state.offset as _)
+                    .build()
+            }
+
+            State::PWriteAll(pwrite_all_state_ptr) => unsafe {
+                let pwrite_all_state = pwrite_all_state_ptr.as_ref();
+                opcode::Write::new(types::Fd(pwrite_all_state.fd), pwrite_all_state.buffer.as_ptr(), pwrite_all_state.buffer.len() as _)
+                    .offset(pwrite_all_state.offset as _)
+                    .build()
+            }
+
+            State::Close(close_state_ptr) => unsafe {
+                let close_state = close_state_ptr.as_ref();
+                opcode::Close::new(types::Fd(close_state.fd))
                     .build()
             }
         };

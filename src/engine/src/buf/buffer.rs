@@ -193,6 +193,7 @@ impl Buffer {
     /// Sets [`offset`](#field.offset) to [`len`](#field.len).
     /// 
     /// It means that all buffer data has been written. So, after it [`written_full`](Buffer::written_full) returns `true`.
+    // TODO add doc where it is used after read to second read. After it, maybe update AsyncRead docs.
     #[inline(always)]
     pub fn set_offset_to_len(&mut self) {
         self.offset = self.len;

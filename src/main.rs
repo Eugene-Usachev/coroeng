@@ -30,48 +30,63 @@
 #![feature(core_intrinsics)]
 
 use std::io::{Error};
-use std::net::{Shutdown, ToSocketAddrs};
+use std::net::{ToSocketAddrs};
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::SeqCst;
-use std::{ptr, thread};
-use std::collections::VecDeque;
-use std::intrinsics::unlikely;
-use std::ops::{BitAnd, BitOr};
+use std::{thread};
+use std::ffi::CString;
 use std::time::{Duration};
-use io_uring::types::{SubmitArgs, Timespec};
-use engine::{coro, run_on_all_cores, run_on_core, spawn_local, wait};
+use io_uring::{opcode, types};
+use engine::{coro, run_on_all_cores, run_on_core, spawn_local};
 use engine::net::{TcpListener, TcpStream};
 use engine::sleep::sleep;
-use engine::buf::{Buffer, buffer, BufPool};
-use engine::io::{AsyncRead, AsyncWrite};
+use engine::buf::{Buffer, buffer};
+use engine::fs::{File, OpenOptions};
+use engine::io::{AsyncPRead, AsyncPWrite, AsyncRead, AsyncWrite};
 use engine::scheduler::end;
-use engine::utils::{bits, CoreId, get_core_ids, Ptr, set_for_current};
+use engine::utils::{get_core_ids};
 
 #[allow(dead_code)]
 fn docs() {
-    use engine::{run_on_core, coro, wait};
-    use engine::sleep::sleep;
-    use engine::utils::get_core_ids;
-    use std::time::Duration;
-
     #[coro]
-    fn print_hello(name: String) {
-        let messages = ["Hello".to_string(), "world".to_string(), "from".to_string(), name, "coroutine!".to_string()];
-        for msg in messages.into_iter() {
-            println!("{}", msg);
-            yield sleep(Duration::from_millis(500));
+    fn test_file() {
+        let options = OpenOptions::new().read(true).write(true).create(true);
+        let file: Result<File, Error> = yield File::open("./test.txt".to_string(), options);
+        if file.is_err() {
+            println!("open failed, reason: {}", file.err().unwrap());
+            end();
+            return;
         }
+        println!("file: {:?}", file.is_ok());
+        let mut file = file.unwrap();
+        let mut buf = buffer();
+        buf.append(b"Hello, world!");
+        yield file.write_all(buf);
+        
+        let res: Result<Buffer, Error> = yield file.read();
+        if res.is_err() {
+            println!("read failed, reason: {}", res.err().unwrap());
+            end();
+            return;
+        }
+        println!("read: {:?}", String::from_utf8(res.unwrap().as_ref().to_vec()).unwrap());
+
+        let mut buf = buffer();
+        buf.append(b"Hello, world!");
+        yield file.pwrite_all(buf, 7);
+        
+        let res: Result<Buffer, Error> = yield file.pread(7);
+        if res.is_err() {
+            println!("read failed, reason: {}", res.err().unwrap());
+            end();
+            return;
+        }
+        println!("pread: {:?}", String::from_utf8(res.unwrap().as_ref().to_vec()).unwrap());
+        
+        end();
     }
 
-    #[coro]
-    fn start_app() {
-        wait!(print_hello("start_app".to_string()));
-    }
-
-    fn main() {
-        let core = get_core_ids().unwrap()[0];
-        run_on_core(start_app, core);
-    }
+    run_on_core(test_file, get_core_ids().unwrap()[0]);
 }
 
 #[coro]
@@ -132,7 +147,7 @@ fn ping_pong() {
                 buffer.clear();
                 buffer.append(b"pong");
 
-                let res: Result<(), Error> = yield stream.write_all(buffer);
+                let res: Result<Buffer, Error> = yield stream.write_all(buffer);
 
                 if res.is_err() {
                     println!("write failed, reason: {}", res.err().unwrap());
@@ -174,7 +189,7 @@ fn tcp_benchmark() {
             if slice.is_empty() {
                 break;
             }
-            let res: Result<(), Error> = yield stream.write_all(slice);
+            let res: Result<Buffer, Error> = yield stream.write_all(slice);
 
             if res.is_err() {
                 println!("write failed, reason: {}", res.err().unwrap());
@@ -240,7 +255,7 @@ fn tcp_profile() {
                 break;
             }
 
-            let res: Result<(), Error> = yield TcpStream::write_all(&mut stream, slice);
+            let res: Result<Buffer, Error> = yield TcpStream::write_all(&mut stream, slice);
 
             if res.is_err() {
                 println!("write failed, reason: {}", res.err().unwrap());
@@ -359,10 +374,23 @@ fn leak_test() {
 
 fn main() {
     //run_on_core(leak_test, get_core_ids().unwrap()[0]);
-    //docs();
+    docs();
     //tcp_profile();
     //tcp_client_benchmark();
-    tcp_benchmark();
+    //tcp_benchmark();
     //run_on_core(ping_pong, get_core_ids().unwrap()[0]);
     //std1();
+    //io_uring();
+}
+
+fn io_uring() {
+    let mut ring = io_uring::IoUring::new(16).unwrap();
+    let cs_ = CString::new("./test.txt").unwrap();
+    let open_how = types::OpenHow::new().flags((libc::O_CREAT | libc::O_RDWR) as u64).mode(0o777);
+    let entry = opcode::OpenAt2::new(types::Fd(libc::AT_FDCWD), unsafe { cs_.as_ptr() }, &open_how)
+        .build();
+    unsafe { ring.submission().push(&entry).unwrap(); }
+    ring.submit_and_wait(1).unwrap();
+    let ret = ring.completion().next().unwrap().result();
+    println!("ret {ret}");
 }

@@ -1,13 +1,16 @@
 // TODO docs
 
-use std::io::Error;
+use std::ffi::CString;
+use std::io::{Error, ErrorKind};
 use std::fmt::{Debug, Formatter};
+use std::path::Path;
+use io_uring::types::OpenHow;
 import_fd_for_os!();
 use socket2::{SockAddr, Socket};
 use crate::coroutine::coroutine::CoroutineImpl;
 use crate::net::tcp::TcpStream;
 use crate::buf::Buffer;
-use crate::fs::OpenOptions;
+use crate::fs::{File, OpenOptions};
 use crate::import_fd_for_os;
 use crate::utils::{Ptr};
 
@@ -56,23 +59,17 @@ pub struct SendAllState {
     pub(crate) result: *mut Result<Buffer, Error>
 }
 
-pub struct CloseState {
-    pub(crate) fd: RawFd,
-    pub(crate) coroutine: CoroutineImpl,
-    pub(crate) result: *mut Result<(), Error>
-}
-
 pub struct OpenState {
-    pub(crate) path: String,
-    pub(crate) options: OpenOptions,
+    pub(crate) path: std::io::Result<CString>,
+    // TODO now only for linux
+    pub(crate) options: std::io::Result<OpenHow>,
     pub(crate) coroutine: CoroutineImpl,
-    pub(crate) result: *mut Result<RawFd, Error>
+    pub(crate) result: *mut Result<File, Error>
 }
 
 pub struct ReadState {
     pub(crate) fd: RawFd,
     pub(crate) buffer: Buffer,
-    pub(crate) offset: usize,
     pub(crate) coroutine: CoroutineImpl,
     pub(crate) result: *mut Result<Buffer, Error>
 }
@@ -80,7 +77,6 @@ pub struct ReadState {
 pub struct WriteState {
     pub(crate) fd: RawFd,
     pub(crate) buffer: Buffer,
-    pub(crate) offset: usize,
     pub(crate) coroutine: CoroutineImpl,
     pub(crate) result: *mut Result<Buffer, Error>
 }
@@ -88,9 +84,38 @@ pub struct WriteState {
 pub struct WriteAllState {
     pub(crate) fd: RawFd,
     pub(crate) buffer: Buffer,
+    pub(crate) coroutine: CoroutineImpl,
+    pub(crate) result: *mut Result<Buffer, Error>
+}
+
+pub struct PReadState {
+    pub(crate) fd: RawFd,
+    pub(crate) buffer: Buffer,
     pub(crate) offset: usize,
     pub(crate) coroutine: CoroutineImpl,
     pub(crate) result: *mut Result<Buffer, Error>
+}
+
+pub struct PWriteState {
+    pub(crate) fd: RawFd,
+    pub(crate) buffer: Buffer,
+    pub(crate) offset: usize,
+    pub(crate) coroutine: CoroutineImpl,
+    pub(crate) result: *mut Result<Buffer, Error>
+}
+
+pub struct PWriteAllState {
+    pub(crate) fd: RawFd,
+    pub(crate) buffer: Buffer,
+    pub(crate) offset: usize,
+    pub(crate) coroutine: CoroutineImpl,
+    pub(crate) result: *mut Result<Buffer, Error>
+}
+
+pub struct CloseState {
+    pub(crate) fd: RawFd,
+    pub(crate) coroutine: CoroutineImpl,
+    pub(crate) result: *mut Result<(), Error>
 }
 
 // TODO Update for not box
@@ -130,11 +155,14 @@ pub enum State {
     ///
     /// This method can lead to one or more syscalls.
     SendAll(Ptr<SendAllState>),
-    Close(Ptr<CloseState>),
     Open(Ptr<OpenState>),
     Read(Ptr<ReadState>),
     Write(Ptr<WriteState>),
-    WriteAll(Ptr<WriteAllState>)
+    WriteAll(Ptr<WriteAllState>),
+    PRead(Ptr<PReadState>),
+    PWrite(Ptr<PWriteState>),
+    PWriteAll(Ptr<PWriteAllState>),
+    Close(Ptr<CloseState>),
 }
 
 pub struct StateManager {
@@ -145,11 +173,14 @@ pub struct StateManager {
     recv_state_pool: Vec<Ptr<RecvState>>,
     send_state_pool: Vec<Ptr<SendState>>,
     send_state_all_pool: Vec<Ptr<SendAllState>>,
-    close_state_pool: Vec<Ptr<CloseState>>,
     open_state_pool: Vec<Ptr<OpenState>>,
     read_state_pool: Vec<Ptr<ReadState>>,
     write_state_pool: Vec<Ptr<WriteState>>,
-    write_all_state_pool: Vec<Ptr<WriteAllState>>
+    write_all_state_pool: Vec<Ptr<WriteAllState>>,
+    pread_state_pool: Vec<Ptr<PReadState>>,
+    pwrite_state_pool: Vec<Ptr<PWriteState>>,
+    pwrite_all_state_pool: Vec<Ptr<PWriteAllState>>,
+    close_state_pool: Vec<Ptr<CloseState>>,
 }
 
 impl StateManager {
@@ -162,11 +193,14 @@ impl StateManager {
             recv_state_pool: Vec::new(),
             send_state_pool: Vec::new(),
             send_state_all_pool: Vec::new(),
-            close_state_pool: Vec::new(),
             open_state_pool: Vec::new(),
             read_state_pool: Vec::new(),
             write_state_pool: Vec::new(),
-            write_all_state_pool: Vec::new()
+            write_all_state_pool: Vec::new(),
+            pread_state_pool: Vec::new(),
+            pwrite_state_pool: Vec::new(),
+            pwrite_all_state_pool: Vec::new(),
+            close_state_pool: Vec::new()
         }
     }
     
@@ -193,11 +227,14 @@ impl StateManager {
             State::Recv(state) => self.recv_state_pool.push(state),
             State::Send(state) => self.send_state_pool.push(state),
             State::SendAll(state) => self.send_state_all_pool.push(state),
-            State::Close(state) => self.close_state_pool.push(state),
             State::Open(state) => self.open_state_pool.push(state),
             State::Read(state) => self.read_state_pool.push(state),
             State::Write(state) => self.write_state_pool.push(state),
             State::WriteAll(state) => self.write_all_state_pool.push(state),
+            State::PRead(state) => self.pread_state_pool.push(state),
+            State::PWrite(state) => self.pwrite_state_pool.push(state),
+            State::PWriteAll(state) => self.pwrite_all_state_pool.push(state),
+            State::Close(state) => self.close_state_pool.push(state),
         }
     }
     
@@ -283,6 +320,101 @@ impl StateManager {
             }
         }
     }
+
+    #[inline(always)]
+    pub fn open(&mut self, path: impl AsRef<Path>, options: OpenOptions, coroutine: CoroutineImpl, result: *mut Result<File, Error>) -> State {
+        let path = match CString::new(path.as_ref().as_os_str().as_encoded_bytes()) {
+            Ok(path) => Ok(path),
+            Err(_) => Err(Error::new(ErrorKind::InvalidInput, "file name contained an unexpected NUL byte")),
+        };
+        match self.open_state_pool.pop() {
+            Some(state) => unsafe {
+                state.write(OpenState { path, options: options.into_os_options(), coroutine, result });
+                State::Open(state)
+            }
+            None => {
+                State::Open(Ptr::new(OpenState { path, options: options.into_os_options(), coroutine, result }))
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub fn read(&mut self, fd: RawFd, buffer: Buffer, coroutine: CoroutineImpl, result: *mut Result<Buffer, Error>) -> State {
+        match self.read_state_pool.pop() {
+            Some(state) => unsafe {
+                state.write(ReadState { fd, buffer, coroutine, result });
+                State::Read(state)
+            }
+            None => {
+                State::Read(Ptr::new(ReadState { fd, buffer, coroutine, result }))
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub fn write(&mut self, fd: RawFd, buffer: Buffer, coroutine: CoroutineImpl, result: *mut Result<Buffer, Error>) -> State {
+        match self.write_state_pool.pop() {
+            Some(state) => unsafe {
+                state.write(WriteState { fd, buffer, coroutine, result });
+                State::Write(state)
+            }
+            None => {
+                State::Write(Ptr::new(WriteState { fd, buffer, coroutine, result }))
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub fn write_all(&mut self, fd: RawFd, buffer: Buffer, coroutine: CoroutineImpl, result: *mut Result<Buffer, Error>) -> State {
+        match self.write_all_state_pool.pop() {
+            Some(state) => unsafe {
+                state.write(WriteAllState { fd, buffer, coroutine, result });
+                State::WriteAll(state)
+            }
+            None => {
+                State::WriteAll(Ptr::new(WriteAllState { fd, buffer, coroutine, result }))
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub fn pread(&mut self, fd: RawFd, buffer: Buffer, offset: usize, coroutine: CoroutineImpl, result: *mut Result<Buffer, Error>) -> State {
+        match self.pread_state_pool.pop() {
+            Some(state) => unsafe {
+                state.write(PReadState { fd, buffer, offset, coroutine, result });
+                State::PRead(state)
+            }
+            None => {
+                State::PRead(Ptr::new(PReadState { fd, buffer, offset, coroutine, result }))
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub fn pwrite(&mut self, fd: RawFd, buffer: Buffer, offset: usize, coroutine: CoroutineImpl, result: *mut Result<Buffer, Error>) -> State {
+        match self.pwrite_state_pool.pop() {
+            Some(state) => unsafe {
+                state.write(PWriteState { fd, buffer, offset, coroutine, result });
+                State::PWrite(state)
+            }
+            None => {
+                State::PWrite(Ptr::new(PWriteState { fd, buffer, offset, coroutine, result }))
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub fn pwrite_all(&mut self, fd: RawFd, buffer: Buffer, offset: usize, coroutine: CoroutineImpl, result: *mut Result<Buffer, Error>) -> State {
+        match self.pwrite_all_state_pool.pop() {
+            Some(state) => unsafe {
+                state.write(PWriteAllState { fd, buffer, offset, coroutine, result });
+                State::PWriteAll(state)
+            }
+            None => {
+                State::PWriteAll(Ptr::new(PWriteAllState { fd, buffer, offset, coroutine, result }))
+            }
+        }
+    }
     
     #[inline(always)]
     pub fn close(&mut self, fd: RawFd, coroutine: CoroutineImpl, result: *mut Result<(), Error>) -> State {
@@ -294,58 +426,6 @@ impl StateManager {
             }
             None => {
                 State::Close(Ptr::new(CloseState { fd, coroutine, result }))
-            }
-        }
-    }
-    
-    #[inline(always)]
-    pub fn open(&mut self, path: String, coroutine: CoroutineImpl, result: *mut Result<RawFd, Error>) -> State {
-        match self.open_state_pool.pop() {
-            Some(state) => unsafe {
-                state.write(OpenState { path, coroutine, result });
-                State::Open(state)
-            }
-            None => {
-                State::Open(Ptr::new(OpenState { path, coroutine, result }))
-            }
-        }
-    }
-
-    #[inline(always)]
-    pub fn read(&mut self, fd: RawFd, buffer: Buffer, offset: usize, coroutine: CoroutineImpl, result: *mut Result<Buffer, Error>) -> State {
-        match self.read_state_pool.pop() {
-            Some(state) => unsafe {
-                state.write(ReadState { fd, buffer, offset, coroutine, result });
-                State::Read(state)
-            }
-            None => {
-                State::Read(Ptr::new(ReadState { fd, buffer, offset, coroutine, result }))
-            }
-        }
-    }
-    
-    #[inline(always)]
-    pub fn write(&mut self, fd: RawFd, buffer: Buffer, offset: usize, coroutine: CoroutineImpl, result: *mut Result<Buffer, Error>) -> State {
-        match self.write_state_pool.pop() {
-            Some(state) => unsafe {
-                state.write(WriteState { fd, buffer, offset, coroutine, result });
-                State::Write(state)
-            }
-            None => {
-                State::Write(Ptr::new(WriteState { fd, buffer, offset, coroutine, result }))
-            }
-        }
-    }
-    
-    #[inline(always)]
-    pub fn write_all(&mut self, fd: RawFd, buffer: Buffer, offset: usize, coroutine: CoroutineImpl, result: *mut Result<Buffer, Error>) -> State {
-        match self.write_all_state_pool.pop() {
-            Some(state) => unsafe {
-                state.write(WriteAllState { fd, buffer, offset, coroutine, result });
-                State::WriteAll(state)
-            }
-            None => {
-                State::WriteAll(Ptr::new(WriteAllState { fd, buffer, offset, coroutine, result }))
             }
         }
     }
@@ -373,10 +453,13 @@ impl State {
         Recv,
         Send,
         SendAll,
-        Close,
         Read,
         Write,
         WriteAll,
+        PRead,
+        PWrite,
+        PWriteAll,
+        Close,
     }
 
     #[inline(always)]
@@ -401,23 +484,35 @@ impl Debug for State {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             State::Empty(state) => { write!(f, "Empty, fd: {:?}", state.fd) }
-            State::AcceptTcp(state) => unsafe { write!(f, "AcceptTcp, fd: {:?}", state.as_ref().fd) }
-            State::ConnectTcp(state) => unsafe {
+            State::AcceptTcp(state_ptr) => unsafe { write!(f, "AcceptTcp, fd: {:?}", state_ptr.as_ref().fd) }
+            State::ConnectTcp(state_ptr) => unsafe {
                 write!(
                     f,
                     "ConnectTcp, addr: {:?}",
-                    state.as_ref().address
+                    state_ptr.as_ref().address
                 )
             }
-            State::Poll(state) => unsafe { write!(f, "Poll, fd: {:?}", state.as_ref().fd) }
-            State::Recv(state) => unsafe { write!(f, "Recv, fd: {:?}", state.as_ref().fd) }
-            State::Send(state) => unsafe { write!(f, "Send, fd: {:?}", state.as_ref().fd) }
-            State::SendAll(state) => unsafe { write!(f, "SendAll, fd: {:?}", state.as_ref().fd) }
-            State::Close(state) => unsafe { write!(f, "Close, fd: {:?}", state.as_ref().fd) }
-            State::Open(state) => unsafe { write!(f, "Open, path: {:?}", state.as_ref().path) }
-            State::Read(state) => unsafe { write!(f, "Read, fd: {:?}", state.as_ref().fd) }
-            State::Write(state) => unsafe { write!(f, "Write, fd: {:?}", state.as_ref().fd) }
-            State::WriteAll(state) => unsafe { write!(f, "WriteAll, fd: {:?}", state.as_ref().fd) }
+            State::Poll(state_ptr) => unsafe { write!(f, "Poll, fd: {:?}", state_ptr.as_ref().fd) }
+            State::Recv(state_ptr) => unsafe { write!(f, "Recv, fd: {:?}", state_ptr.as_ref().fd) }
+            State::Send(state_ptr) => unsafe { write!(f, "Send, fd: {:?}", state_ptr.as_ref().fd) }
+            State::SendAll(state_ptr) => unsafe { write!(f, "SendAll, fd: {:?}", state_ptr.as_ref().fd) }
+            State::Open(state_ptr) => unsafe { write!(f, "Open, path: {:?}", state_ptr.as_ref().path) }
+            State::Read(state_ptr) => unsafe { write!(f, "Read, fd: {:?}", state_ptr.as_ref().fd) }
+            State::Write(state_ptr) => unsafe { write!(f, "Write, fd: {:?}", state_ptr.as_ref().fd) }
+            State::WriteAll(state_ptr) => unsafe { write!(f, "WriteAll, fd: {:?}", state_ptr.as_ref().fd) }
+            State::PRead(state_ptr) => unsafe {
+                let state_ref = state_ptr.as_ref();
+                write!(f, "PRead, fd: {:?}, offset: {}", state_ref.fd, state_ref.offset) 
+            }
+            State::PWrite(state_ptr) => unsafe {
+                let state_ref = state_ptr.as_ref();
+                write!(f, "PWrite, fd: {:?}, offset: {}", state_ref.fd, state_ref.offset) 
+            }
+            State::PWriteAll(state_ptr) => unsafe { 
+                let state_ref = state_ptr.as_ref();
+                write!(f, "PWriteAll, fd: {:?}, offset: {}", state_ref.fd, state_ref.offset)
+            }
+            State::Close(state_ptr) => unsafe { write!(f, "Close, fd: {:?}", state_ptr.as_ref().fd) }
         }
     }
 }

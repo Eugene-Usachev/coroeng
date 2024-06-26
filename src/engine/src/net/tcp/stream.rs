@@ -69,7 +69,7 @@ pub struct TcpStream {
 }
 
 impl TcpStream {
-    /// Create a new `TcpStream` from a raw file descriptor.
+    /// Create a new [`TcpStream`] from a raw file descriptor.
     pub fn new(state_ptr: Ptr<State>) -> Self {
         Self {
             state_ptr
@@ -107,7 +107,7 @@ impl TcpStream {
     }
 }
 
-impl AsyncRead<Buffer> for TcpStream {
+impl AsyncRead for TcpStream {
     #[inline(always)]
     fn read(&mut self, res: *mut Result<Buffer, Error>) -> YieldStatus {
         YieldStatus::recv(self.state_ptr, res)

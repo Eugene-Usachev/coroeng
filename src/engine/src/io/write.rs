@@ -4,26 +4,15 @@ use crate::coroutine::YieldStatus;
 
 /// The AsyncWrite trait provides asynchronous write functionality for various types of data.
 /// It defines methods for writing data either [`partially`](AsyncWrite::write) or [`completely`](AsyncWrite::write_all).
+/// 
+/// # Position based write
+/// 
+/// [`AsyncPWrite`] is a position based write.
 pub trait AsyncWrite {
-    // TODO new docs, because not Result<T> and now it Buffer only
     /// Writes a data to this writer.
     ///
-    /// # With [`Buffer`]
-    ///
-    /// Returns [`Option<Buffer>`] or an error.
-    /// If Option is [`None`], all data has been written.
-    /// Else `Buffer` contains new `offset` field, that indicates how many bytes have been written.
-    ///
-    /// # Note
-    ///
-    /// Don't worry about moving [`Buffer`]. In most cases buffer will be moved in [`BufPool`](crate::buf::BufPool).
-    /// So using [`buffer`](crate::buf::buffer) and moving the buffer is lead to reusing memory and avoiding allocations.
-    ///
-    /// # Without [`Buffer`]
-    ///
-    /// Returns [`Option<T>`] or an error.
-    /// It can be [`None`] if all data has been written.
-    /// Else `T` can be changed for the next writing.
+    /// It returns [`Buffer`] with new `offset` field (read [`Buffer::offset`] and [`Buffer`] for more info).
+    /// So, `offset` contains the number of bytes written. You can check if all bytes were written by [`Buffer::written_full`].
     ///
     /// # Example
     ///
@@ -34,26 +23,24 @@ pub trait AsyncWrite {
     /// use std::io::Error;
     /// use engine::io::AsyncWrite;
     ///
-    /// #[coro]
-    /// fn write_to_stream(mut stream: TcpStream, mut buf: Buffer) {
-    ///     loop {
-    ///         let res: Result<Option<Buffer>, Error> = yield stream.write(buf);
-    ///         if res.is_err() {
-    ///             println!("write failed, reason: {}", res.err().unwrap());
-    ///             break;
-    ///         }
-    ///
-    ///         if let Some(new_buf) = res.unwrap() {
-    ///             buf = new_buf;
-    ///         } else {
-    ///             break;
-    ///         }
-    ///     }
-    /// }
+    ///  #[coro]
+    ///  fn write_all_to_stream(mut stream: TcpStream, mut buf: Buffer) {
+    ///      loop {
+    ///          let res: Result<Buffer, Error> = yield stream.write(buf);
+    ///          if res.is_err() {
+    ///              println!("write failed, reason: {}", res.err().unwrap());
+    ///              break;
+    ///          }
+    ///          
+    ///          buf = res.unwrap();
+    ///          if buf.written_full() {
+    ///              break;
+    ///          }
+    ///      }
+    ///  }
     /// ```
     fn write(&mut self, data: Buffer, res: *mut Result<Buffer, Error>) -> YieldStatus;
-
-    // TODO new docs
+    
     /// Writes all data to this writer or returns an error.
     ///
     /// # Example
@@ -66,8 +53,8 @@ pub trait AsyncWrite {
     /// use engine::io::AsyncWrite;
     ///
     /// #[coro]
-    /// fn write_to_stream(mut stream: TcpStream, mut buf: Buffer) {
-    ///     let res: Result<(), Error> = yield stream.write_all(buf);
+    /// fn write_to_stream(mut stream: TcpStream, buf: Buffer) {
+    ///     let res: Result<Buffer, Error> = yield stream.write_all(buf);
     ///     if res.is_err() {
     ///         println!("write failed, reason: {}", res.err().unwrap());
     ///         break;
@@ -76,4 +63,10 @@ pub trait AsyncWrite {
     /// }
     /// ```
     fn write_all(&mut self, data: Buffer, res: *mut Result<Buffer, Error>) -> YieldStatus;
+}
+
+// TODO docs
+pub trait AsyncPWrite {
+    fn pwrite(&mut self, data: Buffer, offset: usize, res: *mut Result<Buffer, Error>) -> YieldStatus;
+    fn pwrite_all(&mut self, data: Buffer, offset: usize, res: *mut Result<Buffer, Error>) -> YieldStatus;
 }

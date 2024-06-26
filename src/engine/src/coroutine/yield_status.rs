@@ -8,82 +8,167 @@ use crate::io::State;
 use crate::net::{TcpListener, TcpStream};
 use crate::buf::{Buffer};
 use crate::fs::file::File;
+use crate::fs::OpenOptions;
 use crate::utils::Ptr;
 
-/// Represents a new file to be created.
-#[derive(Debug)]
-pub struct NewFile {
-    pub(crate) file_ptr: *mut Result<File, Error>,
-}
-
-/// Represents a new TCP listener to be created.
+/// Contains all necessary information for create a new TCP listener.
 #[derive(Debug)]
 pub struct NewTcpListener {
-    /// The address on which the TCP listener will listen.
+    /// The address on which [`TcpListener`] will listen.
     pub(crate) address: SocketAddr,
     /// Pointer to store the newly created [`TcpListener`].
     pub(crate) listener_ptr: *mut TcpListener,
 }
 
-/// Represent a TCP connect operation.
+/// Contains all necessary information for a TCP connect operation.
 #[derive(Debug)]
 pub struct TcpConnect {
-    /// The address on which the TCP listener will listen.
+    /// The address on which the [`TcpStream`] will be connected.
     pub(crate) address: SocketAddr,
     /// Pointer to store the newly created [`TcpStream`].
     pub(crate) stream_ptr: *mut Result<TcpStream, Error>,
 }
 
-/// Represents a TCP accept operation.
+/// Contains all necessary information for a TCP accept operation.
 #[derive(Debug)]
 pub struct TcpAccept {
-    /// The state ID associated with the TCP accept operation.
+    /// The state pointer associated with [`TcpListener`].
     pub(crate) state_ptr: Ptr<State>,
     /// Pointer to store the result of the TCP accept operation.
     /// If success, the result will contain a [`TcpStream`].
     pub(crate) result_ptr: *mut Result<TcpStream, Error>,
 }
 
-/// Represents a TCP read operation.
+/// Contains all necessary information for a receive operation.
 #[derive(Debug)]
 pub struct Recv {
-    /// The state ID associated with the TCP read operation.
+    /// The state pointer associated with a connection.
     pub(crate) state_ref: Ptr<State>,
-    /// Pointer to store the result of the TCP read operation.
+    /// Pointer to store the result of the read operation.
     /// If success, the result will contain [`Buffer`].
     pub(crate) result_ptr: *mut Result<Buffer, Error>,
 }
 
-/// Represents a TCP write operation.
+/// Contains all necessary information for a send operation.
 #[derive(Debug)]
 pub struct Send {
-    /// The state ID associated with the TCP write operation.
+    /// The state pointer associated with a connection.
     pub(crate) state_ref: Ptr<State>,
     /// The buffer containing data to be written.
     pub(crate) buffer: Buffer,
-    /// Pointer to store the result of the TCP write operation.
-    /// If success, the result will contain the number of bytes written.
+    /// Pointer to store the result of the write operation.
+    /// If success, the result will contain [`Buffer`] with the current `offset`
+    /// (read [`Buffer`] or [`Buffer::offset`] description for more information).
     pub(crate) result_ptr: *mut Result<Buffer, Error>,
 }
 
-/// Represents a TCP write all operation.
+/// Contains all necessary information for a send all operation.
 #[derive(Debug)]
 pub struct SendAll {
-    /// The state ID associated with the TCP write all operation.
+    /// The state pointer associated with a connection.
     pub(crate) state_ref: Ptr<State>,
     /// The buffer containing data to be written.
     pub(crate) buffer: Buffer,
-    /// Pointer to store the result of the TCP write all operation.
-    /// If success, the result will contain `()`.
+    /// Pointer to store the result of the write operation.
+    /// If success, the result will contain [`Buffer`] with the current `offset`
+    /// (read [`Buffer`] or [`Buffer::offset`] description for more information).
     pub(crate) result_ptr: *mut Result<Buffer, Error>,
 }
 
-/// Represents a TCP close operation.
+/// Contains all necessary information for an open file operation.
+#[derive(Debug)]
+pub struct OpenFile {
+    /// Path to the file.
+    pub(crate) path: String,
+    /// Options for opening the file.
+    pub(crate) options: OpenOptions,
+    /// Pointer to store the result of the open file operation.
+    /// If success, the result will contain [`File`].
+    pub(crate) file_ptr: *mut Result<File, Error>,
+}
+/// Contains all necessary information for a read operation without an offset.
+#[derive(Debug)]
+pub struct Read {
+    /// The state pointer associated with a reader (like stream, file, etc.).
+    pub(crate) state_ref: Ptr<State>,
+    /// Pointer to store the result of the read operation.
+    /// If success, the result will contain [`Buffer`].
+    pub(crate) result_ptr: *mut Result<Buffer, Error>,
+}
+
+/// Contains all necessary information for a write operation without an offset.
+#[derive(Debug)]
+pub struct Write {
+    /// The state pointer associated with a writer (like stream, file, etc.).
+    pub(crate) state_ref: Ptr<State>,
+    /// The buffer containing data to be written.
+    pub(crate) buffer: Buffer,
+    /// Pointer to store the result of the write operation.
+    /// If success, the result will contain [`Buffer`] with the current `offset`
+    /// (read [`Buffer`] or [`Buffer::offset`] description for more information).
+    pub(crate) result_ptr: *mut Result<Buffer, Error>,
+}
+
+/// Contains all necessary information for a write all operation without an offset.
+#[derive(Debug)]
+pub struct WriteAll {
+    /// The state pointer associated with a writer (like stream, file, etc.).
+    pub(crate) state_ref: Ptr<State>,
+    /// The buffer containing data to be written.
+    pub(crate) buffer: Buffer,
+    /// Pointer to store the result of the write operation.
+    /// If success, the result will contain [`Buffer`] with the current `offset`
+    /// (read [`Buffer`] or [`Buffer::offset`] description for more information).
+    pub(crate) result_ptr: *mut Result<Buffer, Error>,
+}
+
+/// Contains all necessary information for a positional read operation with an offset.
+#[derive(Debug)]
+pub struct PRead {
+    /// The state pointer associated with a positional reader (like [`File`]).
+    pub(crate) state_ref: Ptr<State>,
+    /// Offset from the beginning of [`File`].
+    pub(crate) offset: usize,
+    /// Pointer to store the result of the positional read operation.
+    /// If success, the result will contain [`Buffer`].
+    pub(crate) result_ptr: *mut Result<Buffer, Error>,
+}
+
+/// Contains all necessary information for a positional write operation with an offset.
+#[derive(Debug)]
+pub struct PWrite {
+    /// The state pointer associated with a positional writer (like [`File`]).
+    pub(crate) state_ref: Ptr<State>,
+    /// The buffer containing data to be written.
+    pub(crate) buffer: Buffer,
+    /// Offset from the beginning of [`File`].
+    pub(crate) offset: usize,
+    /// Pointer to store the result of the positional write operation.
+    /// If success, the result will contain [`Buffer`] with the current `offset`
+    /// (read [`Buffer`] or [`Buffer::offset`] description for more information).
+    pub(crate) result_ptr: *mut Result<Buffer, Error>,
+}
+
+/// Contains all necessary information for a positional write all operation with an offset.
+#[derive(Debug)]
+pub struct PWriteAll {
+    /// The state pointer associated with a positional  writer (like [`File`]).
+    pub(crate) state_ref: Ptr<State>,
+    /// The buffer containing data to be written.
+    pub(crate) buffer: Buffer,
+    /// Offset from the beginning of [`File`].
+    pub(crate) offset: usize,
+    /// Pointer to store the result of the positional write operation.
+    /// If success, the result will contain [`Buffer`] with the current `offset`
+    /// (read [`Buffer`] or [`Buffer::offset`] description for more information).
+    pub(crate) result_ptr: *mut Result<Buffer, Error>,
+}
+/// Contains all necessary information for a close operation.
 #[derive(Debug)]
 pub struct Close {
-    /// The state ID associated with the TCP close operation.
+    /// The state pointer associated with a closable structure (like stream, file, etc.).
     pub(crate) state_ptr: Ptr<State>,
-    /// Pointer to store the result of the TCP close operation.
+    /// Pointer to store the result of the close operation.
     /// If success, the result will contain `()`.
     pub(crate) result_ptr: *mut Result<(), Error>,
 }
@@ -92,11 +177,13 @@ pub struct Close {
 /// It uses instead of await for async programming, and uses for creating new coroutines and for let the scheduler wake other coroutines up.
 #[derive(Debug)]
 pub enum YieldStatus {
-    /// [`Yield`] takes no arguments.
+    /// [`Yield`]
     ///
     /// If yielded, the coroutine let the scheduler wake other coroutines up.
     /// The current coroutine will be woken up by the scheduler after all other coroutines.
     Yield,
+    
+    // TODO Wait. It contains new task and replaces await
 
     /// [`Sleep`] takes the duration.
     ///
@@ -107,56 +194,89 @@ pub enum YieldStatus {
     /// If yielded, the coroutine will sleep for at least the duration.
     Sleep(Duration),
 
-    /// [`NewFile`] takes the filename and a pointer.
+    /// [`NewTcpListener`]
     ///
-    /// If yielded, the new file will be stored in the pointer.
-    NewFile(NewFile),
-
-    /// [`NewTcpListener`] takes the address and a pointer.
-    ///
-    /// If yielded, the new listener will be stored in the pointer.
+    /// If yielded, a new [`TcpListener`] will be stored in the pointer.
     NewTcpListener(NewTcpListener),
 
-    /// [`TcpConnect`] takes the address and a pointer.
+    /// [`TcpConnect`]
     ///
-    /// If yielded, the new connection will be stored in the pointer.
+    /// If yielded, a new [`TcpStream`] will be stored in the pointer.
     TcpConnect(TcpConnect),
 
-    /// [`TcpAccept`] takes is registered to the selector, a state id and a result pointer.
+    /// [`TcpAccept`]
     ///
     /// If yielded, the connection will be accepted and [`TcpStream`] will be stored in the result pointer.
     TcpAccept(TcpAccept),
 
-    /// [`Recv`] takes is registered to the selector, the state id, and a result pointer.
+    /// [`Recv`]
     ///
     /// If yielded, the connection assigned to this state will be read into the inner buffer.
     /// The read result will be stored in the result pointer.
-    /// If successful, the slice reference will be stored in the result pointer.
-    /// If the length of the slice is 0, the connection has been terminated by the other side.
-    ///
-    /// After next yield or return, the buffer will be rewritten.
-    ///
-    /// # Undefined behavior
-    ///
-    /// The undefined behavior will occur if the buffer will be used after the next yield or return.
-    ///
+    /// If successful, [`Buffer`] will be stored in the result pointer.
+    /// If the length of [`Buffer`] is 0, the connection has been terminated by the other side.
     Recv(Recv),
 
-    /// [`Send`] takes the state id, a buffer and a result pointer.
+    /// [`Send`]
     ///
     /// If yielded, a part of the buffer will be written (with a single syscall) to the connection assigned to this state.
     /// The write result will be stored in the result pointer. It will store the number of bytes written to the buffer if successful.
     Send(Send),
 
-    /// [`SendAll`] takes the state id, a buffer and a result pointer.
+    /// [`SendAll`]
     ///
     /// If yielded, the buffer will be written whole (maybe with multiple syscalls) to the connection assigned to this state.
     /// The write result will be stored in the result pointer.
     SendAll(SendAll),
+    
+    /// [`OpenFile`]
+    ///
+    /// If yielded, the file will be opened and stored in the result pointer.
+    OpenFile(OpenFile),
 
-    /// [`Close`] takes the state id.
+    /// [`Read`]
+    ///
+    /// If yielded, the reader assigned to this state will be read into the inner buffer.
+    /// The read result will be stored in the result pointer.
+    /// If successful, [`Buffer`] will be stored in the result pointer.
+    /// If the length of [`Buffer`] is 0, the reader has been terminated by the other side.
+    Read(Read),
+    
+    /// [`Write`]
+    ///
+    /// If yielded, a part of the buffer will be written (with a single syscall) to the writer assigned to this state.
+    /// The write result will be stored in the result pointer. It will store the number of bytes written to the buffer if successful.
+    Write(Write),
+    
+    /// [`WriteAll`]
+    ///
+    /// If yielded, the buffer will be written whole (maybe with multiple syscalls) to the writer assigned to this state.
+    /// The write result will be stored in the result pointer.
+    WriteAll(WriteAll),
+
+    /// [`PRead`]
+    ///
+    /// If yielded, the reader assigned to this state will be read into the inner buffer.
+    /// The read result will be stored in the result pointer.
+    /// If successful, [`Buffer`] will be stored in the result pointer.
+    /// If the length of [`Buffer`] is 0, the reader has been terminated by the other side.
+    PRead(PRead),
+
+    /// [`PWrite`]
+    ///
+    /// If yielded, a part of the buffer will be written (with a single syscall) to the writer assigned to this state.
+    /// The write result will be stored in the result pointer. It will store the number of bytes written to the buffer if successful.
+    PWrite(PWrite),
+
+    /// [`PWriteAll`]
+    ///
+    /// If yielded, the buffer will be written whole (maybe with multiple syscalls) to the writer assigned to this state.
+    /// The write result will be stored in the result pointer.
+    PWriteAll(PWriteAll),
+
+    /// [`Close`]
     /// 
-    /// If yielded, the connection assigned to this state will be closed.
+    /// If yielded, the closable structure assigned to this state will be closed.
     /// The close result will be stored in the result pointer.
     Close(Close)
 }
@@ -170,11 +290,6 @@ impl YieldStatus {
     /// Create a YieldStatus variant [`Sleep`](YieldStatus::Sleep).
     pub fn sleep(duration: Duration) -> Self {
         YieldStatus::Sleep(duration)
-    }
-
-    /// Create a YieldStatus variant [`NewFile`](YieldStatus::NewFile).
-    pub fn new_file(res: *mut Result<File, Error>) -> Self {
-        YieldStatus::NewFile(NewFile { file_ptr: res })
     }
 
     /// Create a YieldStatus variant [`NewTcpListener`](YieldStatus::NewTcpListener).
@@ -205,6 +320,41 @@ impl YieldStatus {
     /// Create a YieldStatus variant [`TcpWriteAll`](YieldStatus::SendAll).
     pub fn send_all(state_ref: Ptr<State>, buffer: Buffer, result_ptr: *mut Result<Buffer, Error>) -> Self {
         YieldStatus::SendAll(SendAll { state_ref, buffer, result_ptr })
+    }
+    
+    /// Create a YieldStatus variant [`OpenFile`](YieldStatus::OpenFile).
+    pub fn open_file(path: String, options: OpenOptions, result_ptr: *mut Result<File, Error>) -> Self {
+        YieldStatus::OpenFile(OpenFile { path, options, file_ptr: result_ptr })
+    }
+    
+    /// Create a YieldStatus variant [`Read`](YieldStatus::Read).
+    pub fn read(state_ref: Ptr<State>, result_ptr: *mut Result<Buffer, Error>) -> Self {
+        YieldStatus::Read(Read { state_ref, result_ptr })
+    }
+    
+    /// Create a YieldStatus variant [`Write`](YieldStatus::Write).
+    pub fn write(state_ref: Ptr<State>, buffer: Buffer, result_ptr: *mut Result<Buffer, Error>) -> Self {
+        YieldStatus::Write(Write { state_ref, buffer, result_ptr })
+    }
+    
+    /// Create a YieldStatus variant [`WriteAll`](YieldStatus::WriteAll).
+    pub fn write_all(state_ref: Ptr<State>, buffer: Buffer, result_ptr: *mut Result<Buffer, Error>) -> Self {
+        YieldStatus::WriteAll(WriteAll { state_ref, buffer, result_ptr })
+    }
+    
+    /// Create a YieldStatus variant [`PRead`](YieldStatus::PRead).
+    pub fn pread(state_ref: Ptr<State>, offset: usize, result_ptr: *mut Result<Buffer, Error>) -> Self {
+        YieldStatus::PRead(PRead { state_ref, offset, result_ptr })
+    }
+    
+    /// Create a YieldStatus variant [`PWrite`](YieldStatus::PWrite).
+    pub fn pwrite(state_ref: Ptr<State>, offset: usize, buffer: Buffer, result_ptr: *mut Result<Buffer, Error>) -> Self {
+        YieldStatus::PWrite(PWrite { state_ref, offset, buffer, result_ptr })
+    }
+    
+    /// Create a YieldStatus variant [`PWriteAll`](YieldStatus::PWriteAll).
+    pub fn pwrite_all(state_ref: Ptr<State>, offset: usize, buffer: Buffer, result_ptr: *mut Result<Buffer, Error>) -> Self {
+        YieldStatus::PWriteAll(PWriteAll { state_ref, offset, buffer, result_ptr })
     }
 
     /// Create a YieldStatus variant [`TcpClose`](YieldStatus::Close).

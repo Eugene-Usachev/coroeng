@@ -1,15 +1,16 @@
 // TODO update docs
 use std::io::Error;
+use crate::buf::Buffer;
 use crate::coroutine::YieldStatus;
 
-/// The AsyncRead trait provides asynchronous read functionality for various types of data.
-pub trait AsyncRead<T> {
+/// The AsyncRead trait provides asynchronous read.
+///
+/// # Position based read
+///
+/// [`AsyncPRead`] is a position based read.
+pub trait AsyncRead {
     /// Reads data from this reader. It will wait (non-blocking) until data is available or an error occurs.
-    /// When a coroutine is woken up, returns a reference to a slice of read bytes or an error.
-    ///
-    /// ### Warning
-    ///
-    /// After `yielding`, the returned slice may be rewritten. So, if you want to `yield` after read, you must copy the slice into a new one.
+    /// When a coroutine is woken up, returns [`Buffer`] with `len` field where the number of bytes read is stored.
     ///
     /// # Example
     ///
@@ -22,13 +23,10 @@ pub trait AsyncRead<T> {
     ///
     /// #[coro]
     /// fn handle_tcp_client(mut stream: TcpStream) {
-    ///     let slice: &[u8] = (yield stream.read()).unwrap();
-    ///     if slice.is_empty() {
+    ///     let buf: Buffer = (yield stream.read()).unwrap();
+    ///     if buf.is_empty() {
     ///         return;
     ///     }
-    ///
-    ///     let mut buf = buffer();
-    ///     buf.append(slice);
     ///
     ///     let res: Result<(), Error> = yield TcpStream::write_all(&mut stream, buf);
     ///
@@ -38,6 +36,8 @@ pub trait AsyncRead<T> {
     ///     }
     /// }
     ///
+    /// // TODO docs. Code below is not working. Maybe write ReadIntoBuf?
+    /// 
     /// const MUST_READ: usize = 100;
     ///
     /// #[coro]
@@ -45,13 +45,12 @@ pub trait AsyncRead<T> {
     ///     let mut full_buf: Option<Buffer> = None;
     ///     let mut read = 0;
     ///     loop {
-    ///         let slice: &[u8] = (yield stream.read()).unwrap();
-    ///         if slice.is_empty() {
+    ///         let buf: Buffer = (yield stream.read()).unwrap();
+    ///         if buf.is_empty() {
     ///             break;
     ///         }
     ///
-    ///         read += slice.len();
-    ///         if read == MUST_READ {
+    ///         if buf.len() == MUST_READ {
     ///             if full_buf.is_none() {
     ///                 // work with slice. Fast case, because we don't need to copy it.
     ///             } else {
@@ -66,5 +65,10 @@ pub trait AsyncRead<T> {
     ///     }
     /// }
     /// ```
-    fn read(&mut self, res: *mut Result<T, Error>) -> YieldStatus;
+    fn read(&mut self, res: *mut Result<Buffer, Error>) -> YieldStatus;
+}
+
+// TODO docs
+pub trait AsyncPRead {
+    fn pread(&mut self, offset: usize, res: *mut Result<Buffer, Error>) -> YieldStatus;
 }

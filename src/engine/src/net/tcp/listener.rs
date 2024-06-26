@@ -69,7 +69,7 @@ pub struct TcpListener {
 }
 
 impl TcpListener {
-    /// Creates a new TcpListener from an existing fd.
+    /// Creates a new [`TcpListener`] from an existing fd.
     pub fn from_state_ptr(state_ptr: Ptr<State>) -> Self {
         Self {
             state_ptr

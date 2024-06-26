@@ -14,6 +14,7 @@ use crate::io::sys::unix::{IoUringSelector};
 use crate::io::{Selector, State, StateManager};
 use crate::net::{TcpListener};
 use crate::{write_err};
+use crate::buf::buffer;
 use crate::run::uninit;
 use crate::sleep::SleepingCoroutine;
 use crate::utils::Ptr;
@@ -148,10 +149,6 @@ impl Scheduler {
                         self.sleeping.insert(sleep);
                     }
 
-                    YieldStatus::NewFile(status) => {
-
-                    }
-
                     YieldStatus::NewTcpListener(status) => {
                         let fd = TcpListener::get_fd(status.address);
                         let mut state_ptr = self.get_state_ptr();
@@ -200,6 +197,54 @@ impl Scheduler {
                         let mut state_ptr = status.state_ref;
                         let state_ref = unsafe { state_ptr.as_ref() };
                         state_ptr.rewrite_state(self.state_manager.send_all(state_ref.fd(), status.buffer, task, status.result_ptr), self.state_manager());
+                        selector.register(state_ptr);
+                    }
+                    
+                    YieldStatus::OpenFile(status) => {
+                        let mut state_ptr = self.get_state_ptr();
+                        state_ptr.rewrite_state(self.state_manager().open(status.path, status.options, task, status.file_ptr), self.state_manager());
+                        selector.register(state_ptr);
+                    }
+                    
+                    YieldStatus::Read(status) => {
+                        let mut state_ptr = status.state_ref;
+                        let state_ref = unsafe { state_ptr.as_ref() };
+                        state_ptr.rewrite_state(self.state_manager.read(state_ref.fd(), buffer(), task, status.result_ptr), self.state_manager());
+                        selector.register(state_ptr);
+                    }
+                    
+                    YieldStatus::Write(status) => {
+                        let mut state_ptr = status.state_ref;
+                        let state_ref = unsafe { state_ptr.as_ref() };
+                        state_ptr.rewrite_state(self.state_manager.write(state_ref.fd(), status.buffer, task, status.result_ptr), self.state_manager());
+                        selector.register(state_ptr);
+                    }
+                    
+                    YieldStatus::WriteAll(status) => {
+                        let mut state_ptr = status.state_ref;
+                        let state_ref = unsafe { state_ptr.as_ref() };
+                        state_ptr.rewrite_state(self.state_manager.write_all(state_ref.fd(), status.buffer, task, status.result_ptr), self.state_manager());
+                        selector.register(state_ptr);
+                    }
+                    
+                    YieldStatus::PRead(status) => {
+                        let mut state_ptr = status.state_ref;
+                        let state_ref = unsafe { state_ptr.as_ref() };
+                        state_ptr.rewrite_state(self.state_manager.pread(state_ref.fd(), buffer(), status.offset, task, status.result_ptr), self.state_manager());
+                        selector.register(state_ptr);
+                    }
+                    
+                    YieldStatus::PWrite(status) => {
+                        let mut state_ptr = status.state_ref;
+                        let state_ref = unsafe { state_ptr.as_ref() };
+                        state_ptr.rewrite_state(self.state_manager.pwrite(state_ref.fd(), status.buffer, status.offset, task, status.result_ptr), self.state_manager());
+                        selector.register(state_ptr);
+                    }
+                    
+                    YieldStatus::PWriteAll(status) => {
+                        let mut state_ptr = status.state_ref;
+                        let state_ref = unsafe { state_ptr.as_ref() };
+                        state_ptr.rewrite_state(self.state_manager.pwrite_all(state_ref.fd(), status.buffer, status.offset, task, status.result_ptr), self.state_manager());
                         selector.register(state_ptr);
                     }
 
