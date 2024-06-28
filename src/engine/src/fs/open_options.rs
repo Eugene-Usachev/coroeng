@@ -6,6 +6,7 @@ use libc::c_int;
 
 // TODO docs with examples
 /// Options and flags which can be used to configure how a file is opened.
+#[derive(Copy, Clone)]
 pub struct OpenOptions {
     /// This option, when true, will indicate that the file should be read-able if opened.
     read: bool,

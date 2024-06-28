@@ -175,18 +175,20 @@ impl Scheduler {
                         }
                         let state_ = self.state_manager.connect_tcp(socket2::SockAddr::from(status.address), 
                                                                     unsafe { socket_.unwrap_unchecked() }, task, status.stream_ptr);
-                        selector.register(Ptr::new(state_));
+                        let mut state_ptr = self.get_state_ptr();
+                        state_ptr.rewrite_state(state_, self.state_manager());
+                        selector.register(state_ptr);
                     }
 
                     YieldStatus::Recv(status) => {
-                        let mut state_ptr = status.state_ref;
+                        let mut state_ptr = status.state_ptr;
                         let state_ref = unsafe { state_ptr.as_ref() };
                         state_ptr.rewrite_state(self.state_manager.poll(state_ref.fd(), task, status.result_ptr), self.state_manager());
                         selector.register(state_ptr);
                     }
 
                     YieldStatus::Send(status) => {
-                        let mut state_ptr = status.state_ref;
+                        let mut state_ptr = status.state_ptr;
                         let state_ref = unsafe { state_ptr.as_ref() };
                         let fd = state_ref.fd();
                         state_ptr.rewrite_state(self.state_manager.send(fd, status.buffer, task, status.result_ptr), self.state_manager());
@@ -194,7 +196,7 @@ impl Scheduler {
                     }
 
                     YieldStatus::SendAll(status) => {
-                        let mut state_ptr = status.state_ref;
+                        let mut state_ptr = status.state_ptr;
                         let state_ref = unsafe { state_ptr.as_ref() };
                         state_ptr.rewrite_state(self.state_manager.send_all(state_ref.fd(), status.buffer, task, status.result_ptr), self.state_manager());
                         selector.register(state_ptr);
@@ -207,42 +209,42 @@ impl Scheduler {
                     }
                     
                     YieldStatus::Read(status) => {
-                        let mut state_ptr = status.state_ref;
+                        let mut state_ptr = status.state_ptr;
                         let state_ref = unsafe { state_ptr.as_ref() };
                         state_ptr.rewrite_state(self.state_manager.read(state_ref.fd(), buffer(), task, status.result_ptr), self.state_manager());
                         selector.register(state_ptr);
                     }
                     
                     YieldStatus::Write(status) => {
-                        let mut state_ptr = status.state_ref;
+                        let mut state_ptr = status.state_ptr;
                         let state_ref = unsafe { state_ptr.as_ref() };
                         state_ptr.rewrite_state(self.state_manager.write(state_ref.fd(), status.buffer, task, status.result_ptr), self.state_manager());
                         selector.register(state_ptr);
                     }
                     
                     YieldStatus::WriteAll(status) => {
-                        let mut state_ptr = status.state_ref;
+                        let mut state_ptr = status.state_ptr;
                         let state_ref = unsafe { state_ptr.as_ref() };
                         state_ptr.rewrite_state(self.state_manager.write_all(state_ref.fd(), status.buffer, task, status.result_ptr), self.state_manager());
                         selector.register(state_ptr);
                     }
                     
                     YieldStatus::PRead(status) => {
-                        let mut state_ptr = status.state_ref;
+                        let mut state_ptr = status.state_ptr;
                         let state_ref = unsafe { state_ptr.as_ref() };
                         state_ptr.rewrite_state(self.state_manager.pread(state_ref.fd(), buffer(), status.offset, task, status.result_ptr), self.state_manager());
                         selector.register(state_ptr);
                     }
                     
                     YieldStatus::PWrite(status) => {
-                        let mut state_ptr = status.state_ref;
+                        let mut state_ptr = status.state_ptr;
                         let state_ref = unsafe { state_ptr.as_ref() };
                         state_ptr.rewrite_state(self.state_manager.pwrite(state_ref.fd(), status.buffer, status.offset, task, status.result_ptr), self.state_manager());
                         selector.register(state_ptr);
                     }
                     
                     YieldStatus::PWriteAll(status) => {
-                        let mut state_ptr = status.state_ref;
+                        let mut state_ptr = status.state_ptr;
                         let state_ref = unsafe { state_ptr.as_ref() };
                         state_ptr.rewrite_state(self.state_manager.pwrite_all(state_ref.fd(), status.buffer, status.offset, task, status.result_ptr), self.state_manager());
                         selector.register(state_ptr);
@@ -254,13 +256,33 @@ impl Scheduler {
                         state_ptr.rewrite_state(self.state_manager.close(state_ref.fd(), task, status.result_ptr), self.state_manager());
                         selector.register(state_ptr);
                     }
+
+                    YieldStatus::Rename(status) => {
+                        let state_ = self.state_manager.rename(status.old_path, status.new_path, task, status.result_ptr);
+                        let mut state_ptr = self.get_state_ptr();
+                        state_ptr.rewrite_state(state_, self.state_manager());
+                        selector.register(state_ptr);
+                    }
+
+                    YieldStatus::CreateDir(status) => {
+                        let state_ = self.state_manager.remove_file(status.path, task, status.result_ptr);
+                        let mut state_ptr = self.get_state_ptr();
+                        state_ptr.rewrite_state(state_, self.state_manager());
+                        selector.register(state_ptr);
+                    }
                     
                     YieldStatus::RemoveFile(status) => {
-                        todo!();
+                        let state_ = self.state_manager.remove_file(status.path, task, status.result_ptr);
+                        let mut state_ptr = self.get_state_ptr();
+                        state_ptr.rewrite_state(state_, self.state_manager());
+                        selector.register(state_ptr);
                     }
                     
                     YieldStatus::RemoveDir(status) => {
-                        todo!();
+                        let state_ = self.state_manager.remove_dir(status.path, task, status.result_ptr);
+                        let mut state_ptr = self.get_state_ptr();
+                        state_ptr.rewrite_state(state_, self.state_manager());
+                        selector.register(state_ptr);
                     }
                 }
             }

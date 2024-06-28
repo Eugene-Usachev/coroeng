@@ -1,4 +1,5 @@
 use std::io::Error;
+use std::path::Path;
 use crate::buf::Buffer;
 use crate::coroutine::YieldStatus;
 use crate::fs::OpenOptions;
@@ -19,8 +20,13 @@ impl File {
         }
     }
     
-    pub fn open(path: String, options: OpenOptions, res: *mut Result<File, Error>) -> YieldStatus {
+    pub fn open(path: Box<dyn AsRef<Path>>, options: OpenOptions, res: *mut Result<File, Error>) -> YieldStatus {
         YieldStatus::open_file(path, options, res)
+    }
+
+    #[inline(always)]
+    pub fn remove(path: Box<dyn AsRef<Path>>, res: *mut Result<(), Error>) -> YieldStatus {
+        YieldStatus::remove_file(path, res)
     }
 }
 
@@ -53,6 +59,12 @@ impl AsyncPWrite for File {
     
     fn pwrite_all(&mut self, data: Buffer, offset: usize, res: *mut Result<Buffer, Error>) -> YieldStatus {
         YieldStatus::pwrite_all(self.state_ptr, offset, data, res)
+    }
+}
+
+impl Drop for File {
+    fn drop(&mut self) {
+        // TODO
     }
 }
 

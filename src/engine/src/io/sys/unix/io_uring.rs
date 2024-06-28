@@ -3,7 +3,6 @@ use std::cell::UnsafeCell;
 use std::io::Error;
 use std::os::fd::{AsRawFd, IntoRawFd};
 use std::{ptr};
-use std::ffi::CString;
 use std::intrinsics::unlikely;
 use io_uring::{cqueue, IoUring, opcode, squeue, types};
 use io_uring::types::{SubmitArgs, Timespec};
@@ -253,6 +252,20 @@ impl IoUringSelector {
                 write_ok!(state.result, ());
                 scheduler.handle_coroutine_state(self, state.coroutine)
             }
+            
+            State::Rename(rename_state_ptr) => {
+                let state = handle_ret_and_get_state!(ret, rename_state_ptr, scheduler, self);
+                
+                write_ok!(state.result, ());
+                scheduler.handle_coroutine_state(self, state.coroutine)
+            }
+            
+            State::CreateDir(mkdir_state_ptr) => {
+                let state = handle_ret_and_get_state!(ret, mkdir_state_ptr, scheduler, self);
+                
+                write_ok!(state.result, ());
+                scheduler.handle_coroutine_state(self, state.coroutine)
+            }
 
             State::RemoveFile(remove_file_ptr) => {
                 let state = handle_ret_and_get_state!(ret, remove_file_ptr, scheduler, self);
@@ -269,6 +282,21 @@ impl IoUringSelector {
             }
         }
     }
+}
+
+macro_rules! unwrap_result_ref {
+    ($selector: ident, $state_ref: expr, $field_name: ident, $state_ptr: ident) => {
+        {
+            if unlikely($state_ref.$field_name.is_err()) {
+                let state = unsafe { $state_ptr.read() };
+                write_err!(state.result, state.$field_name.unwrap_err_unchecked());
+                local_scheduler().handle_coroutine_state($selector, state.coroutine);
+                return;
+            }
+            
+            unsafe { $state_ref.$field_name.as_ref().unwrap_unchecked() }
+        }
+    };
 }
 
 impl Selector for IoUringSelector {
@@ -298,37 +326,37 @@ impl Selector for IoUringSelector {
         let mut entry = match state {
             State::Empty(_) => { panic!("[BUG] tried to register an empty state in [`IoUringSelector`]. Please report this issue.") }
 
-            State::AcceptTcp(accept_tcp_state_ptr) => unsafe {
-                opcode::Accept::new(types::Fd(accept_tcp_state_ptr.as_ref().fd), ptr::null_mut(), ptr::null_mut())
+            State::AcceptTcp(accept_tcp_state_ptr) => {
+                opcode::Accept::new(types::Fd(unsafe { accept_tcp_state_ptr.as_ref().fd }), ptr::null_mut(), ptr::null_mut())
                     .build()
             }
 
-            State::ConnectTcp(connect_tcp_state_ptr) => unsafe {
-                let connect_tcp_state = connect_tcp_state_ptr.as_ref();
+            State::ConnectTcp(connect_tcp_state_ptr) => {
+                let connect_tcp_state = unsafe { connect_tcp_state_ptr.as_ref() };
                 opcode::Connect::new(types::Fd(connect_tcp_state.socket.as_raw_fd()), connect_tcp_state.address.as_ptr(), connect_tcp_state.address.len())
                     .build()
             }
 
-            State::Poll(poll_state_ptr) => unsafe {
-                let poll_state = poll_state_ptr.as_ref();
+            State::Poll(poll_state_ptr) => {
+                let poll_state = unsafe { poll_state_ptr.as_ref() };
                 opcode::PollAdd::new(types::Fd(poll_state.fd), libc::POLLIN as _)
                     .build()
             }
 
-            State::Recv(recv_state_ptr) => unsafe {
-                let recv_state = recv_state_ptr.as_mut();
+            State::Recv(recv_state_ptr) => {
+                let recv_state = unsafe { recv_state_ptr.as_mut() };
                 opcode::Recv::new(types::Fd(recv_state.fd), recv_state.buffer.as_mut_ptr(), recv_state.buffer.cap() as _)
                     .build()
             }
 
-            State::Send(send_state_ptr) => unsafe {
-                let send_state = send_state_ptr.as_ref();
+            State::Send(send_state_ptr) => {
+                let send_state = unsafe { send_state_ptr.as_ref() };
                 opcode::Send::new(types::Fd(send_state.fd), send_state.buffer.as_ptr(), send_state.buffer.len() as _)
                     .build()
             }
 
-            State::SendAll(send_all_state_ptr) => unsafe {
-                let send_all_state = send_all_state_ptr.as_ref();
+            State::SendAll(send_all_state_ptr) => {
+                let send_all_state = unsafe { send_all_state_ptr.as_ref() };
                 opcode::Send::new(types::Fd(send_all_state.fd), send_all_state.buffer.as_ptr(), send_all_state.buffer.len() as _)
                     .build()
             }
@@ -336,94 +364,87 @@ impl Selector for IoUringSelector {
             State::Open(open_state_ptr) => {
                 let open_state = unsafe { open_state_ptr.as_mut() };
                 let dir_fd = types::Fd(libc::AT_FDCWD);
-                
-                if open_state.options.is_err() {
-                    let open_state = unsafe { open_state_ptr.read() };
-                    write_err!(open_state.result, open_state.options.unwrap_err_unchecked());
-                    local_scheduler().handle_coroutine_state(self, open_state.coroutine);
-                    return;
-                }
-                let open_how = unsafe { open_state.options.as_ref().unwrap_unchecked() };
-                
-                if open_state.path.is_err() {
-                    let open_state = unsafe { open_state_ptr.read() };
-                    write_err!(open_state.result, open_state.path.unwrap_err_unchecked());
-                    local_scheduler().handle_coroutine_state(self, open_state.coroutine);
-                    return;
-                }
-                let cs = unsafe { open_state.path.as_ref().unwrap_unchecked() };
+                let open_how = unwrap_result_ref!(self, open_state, options, open_state_ptr);
+                let cs = unwrap_result_ref!(self, open_state, path, open_state_ptr);
                
                 opcode::OpenAt2::new(dir_fd, cs.as_ptr(), open_how)
                     .build()
             }
 
-            State::Read(read_state_ptr) => unsafe {
-                let read_state = read_state_ptr.as_mut();
+            State::Read(read_state_ptr) => {
+                let read_state = unsafe { read_state_ptr.as_mut() };
                 opcode::Read::new(types::Fd(read_state.fd), read_state.buffer.as_mut_ptr(), read_state.buffer.cap() as _)
                     .build()
             }
 
-            State::Write(write_state_ptr) => unsafe {
-                let write_state = write_state_ptr.as_ref();
+            State::Write(write_state_ptr) => {
+                let write_state = unsafe { write_state_ptr.as_ref() };
                 opcode::Write::new(types::Fd(write_state.fd), write_state.buffer.as_ptr(), write_state.buffer.len() as _)
                     .build()
             }
 
-            State::WriteAll(write_all_state_ptr) => unsafe {
-                let write_all_state = write_all_state_ptr.as_ref();
+            State::WriteAll(write_all_state_ptr) => {
+                let write_all_state = unsafe { write_all_state_ptr.as_ref() };
                 opcode::Write::new(types::Fd(write_all_state.fd), write_all_state.buffer.as_ptr(), write_all_state.buffer.len() as _)
                     .build()
             }
 
-            State::PRead(pread_state_ptr) => unsafe {
-                let pread_state = pread_state_ptr.as_mut();
+            State::PRead(pread_state_ptr) => {
+                let pread_state = unsafe { pread_state_ptr.as_mut() };
                 opcode::Read::new(types::Fd(pread_state.fd), pread_state.buffer.as_mut_ptr(), pread_state.buffer.cap() as _)
                     .offset(pread_state.offset as _)
                     .build()
             }
 
-            State::PWrite(pwrite_state_ptr) => unsafe {
-                let pwrite_state = pwrite_state_ptr.as_ref();
+            State::PWrite(pwrite_state_ptr) => {
+                let pwrite_state = unsafe { pwrite_state_ptr.as_ref() };
                 opcode::Write::new(types::Fd(pwrite_state.fd), pwrite_state.buffer.as_ptr(), pwrite_state.buffer.len() as _)
                     .offset(pwrite_state.offset as _)
                     .build()
             }
 
-            State::PWriteAll(pwrite_all_state_ptr) => unsafe {
-                let pwrite_all_state = pwrite_all_state_ptr.as_ref();
+            State::PWriteAll(pwrite_all_state_ptr) => {
+                let pwrite_all_state = unsafe { pwrite_all_state_ptr.as_ref() };
                 opcode::Write::new(types::Fd(pwrite_all_state.fd), pwrite_all_state.buffer.as_ptr(), pwrite_all_state.buffer.len() as _)
                     .offset(pwrite_all_state.offset as _)
                     .build()
             }
 
-            State::Close(close_state_ptr) => unsafe {
-                let close_state = close_state_ptr.as_ref();
+            State::Close(close_state_ptr) => {
+                let close_state = unsafe { close_state_ptr.as_ref() };
                 opcode::Close::new(types::Fd(close_state.fd))
                     .build()
             }
 
-            State::RemoveFile(remove_state_ptr) => unsafe {
-                let remove_state = remove_state_ptr.as_ref();
-                if remove_state.path.is_err() {
-                    let open_state = remove_state_ptr.read();
-                    write_err!(open_state.result, open_state.path.unwrap_err_unchecked());
-                    local_scheduler().handle_coroutine_state(self, open_state.coroutine);
-                    return;
-                }
-                let cs = remove_state.path.as_ref().unwrap_unchecked();
+            State::Rename(rename_state_ptr) => {
+                let rename_state = unsafe { rename_state_ptr.as_ref() };
+                let old_cs = unwrap_result_ref!(self, rename_state, old_path, rename_state_ptr);
+                let new_cs = unwrap_result_ref!(self, rename_state, new_path, rename_state_ptr);
+
+                opcode::RenameAt::new(types::Fd(libc::AT_FDCWD), old_cs.as_ptr(), types::Fd(libc::AT_FDCWD), new_cs.as_ptr())
+                    .build()
+            }
+
+            State::CreateDir(create_dir_state_ptr) => {
+                let create_dir_state = unsafe { create_dir_state_ptr.as_ref() };
+                let cs = unwrap_result_ref!(self, create_dir_state, path, create_dir_state_ptr);
+                
+                opcode::MkDirAt::new(types::Fd(libc::AT_FDCWD), cs.as_ptr())
+                    .build()
+            }
+
+            State::RemoveFile(remove_state_ptr) => {
+                let remove_state = unsafe { remove_state_ptr.as_ref() };
+                let cs = unwrap_result_ref!(self, remove_state, path, remove_state_ptr);
+                
                 opcode::UnlinkAt::new(types::Fd(libc::AT_FDCWD), cs.as_ptr())
                     .build()
             }
 
-            State::RemoveDir(remove_state_ptr) => unsafe {
-                let remove_state = remove_state_ptr.as_ref();
-                if remove_state.path.is_err() {
-                    let open_state = remove_state_ptr.read();
-                    write_err!(open_state.result, open_state.path.unwrap_err_unchecked());
-                    local_scheduler().handle_coroutine_state(self, open_state.coroutine);
-                    return;
-                }
-                let cs = remove_state.path.as_ref().unwrap_unchecked();
+            State::RemoveDir(remove_state_ptr) => {
+                let remove_state = unsafe { remove_state_ptr.as_ref() };
+                let cs = unwrap_result_ref!(self, remove_state, path, remove_state_ptr);
+                
                 opcode::UnlinkAt::new(types::Fd(libc::AT_FDCWD), cs.as_ptr())
                     .flags(libc::AT_REMOVEDIR)
                     .build()

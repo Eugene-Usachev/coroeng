@@ -51,7 +51,7 @@ fn docs() {
     #[coro]
     fn test_file() {
         let options = OpenOptions::new().read(true).write(true).create(true);
-        let file: Result<File, Error> = yield File::open("./test.txt".to_string(), options);
+        let file: Result<File, Error> = yield File::open(Box::new("./test.txt".to_string()), options);
         if file.is_err() {
             println!("open failed, reason: {}", file.err().unwrap());
             end();
@@ -339,12 +339,15 @@ fn tcp_profile() {
 fn benchmark_sleep() {
     #[coro]
     fn spawn_sleep() {
-        println!("spawned {}", SPAWNED.fetch_add(1, SeqCst) + 1);
+        let s = SPAWNED.fetch_add(1, SeqCst) + 1;
+        if s % 10000 == 0 {
+            println!("spawned {}", s);
+        }
         yield sleep(Duration::from_secs(1000000));
     }
 
     const N: usize = 10_000_000;
-    const PAR: usize = 6;
+    const PAR: usize = 1;
 
     static SPAWNED: AtomicUsize = AtomicUsize::new(0);
 
@@ -355,7 +358,7 @@ fn benchmark_sleep() {
         }
     }
 
-    run_on_all_cores(benchmark);
+    run_on_core(benchmark, get_core_ids().unwrap()[0]);
 }
 
 #[coro]
@@ -373,6 +376,7 @@ fn leak_test() {
 }
 
 fn main() {
+    //benchmark_sleep();
     //run_on_core(leak_test, get_core_ids().unwrap()[0]);
     docs();
     //tcp_profile();

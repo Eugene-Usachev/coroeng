@@ -1,7 +1,7 @@
 // TODO docs
 
 use std::ffi::CString;
-use std::io::{Error, ErrorKind};
+use std::io::{Error};
 use std::fmt::{Debug, Formatter};
 use std::path::Path;
 use io_uring::types::OpenHow;
@@ -118,6 +118,19 @@ pub struct CloseState {
     pub(crate) result: *mut Result<(), Error>
 }
 
+pub struct RenameState {
+    pub(crate) old_path: std::io::Result<CString>,
+    pub(crate) new_path: std::io::Result<CString>,
+    pub(crate) coroutine: CoroutineImpl,
+    pub(crate) result: *mut Result<(), Error>
+}
+
+pub struct CreateDirState {
+    pub(crate) path: std::io::Result<CString>,
+    pub(crate) coroutine: CoroutineImpl,
+    pub(crate) result: *mut Result<(), Error>
+}
+
 pub struct RemoveState {
     pub(crate) path: std::io::Result<CString>,
     pub(crate) coroutine: CoroutineImpl,
@@ -169,6 +182,8 @@ pub enum State {
     PWrite(Ptr<PWriteState>),
     PWriteAll(Ptr<PWriteAllState>),
     Close(Ptr<CloseState>),
+    Rename(Ptr<RenameState>),
+    CreateDir(Ptr<CreateDirState>),
     RemoveFile(Ptr<RemoveState>),
     RemoveDir(Ptr<RemoveState>),
 }
@@ -189,6 +204,8 @@ pub struct StateManager {
     pwrite_state_pool: Vec<Ptr<PWriteState>>,
     pwrite_all_state_pool: Vec<Ptr<PWriteAllState>>,
     close_state_pool: Vec<Ptr<CloseState>>,
+    rename_state_pool: Vec<Ptr<RenameState>>,
+    create_dir_state_pool: Vec<Ptr<CreateDirState>>,
     remove_state_pool: Vec<Ptr<RemoveState>>,
 }
 
@@ -209,8 +226,10 @@ impl StateManager {
             pread_state_pool: Vec::new(),
             pwrite_state_pool: Vec::new(),
             pwrite_all_state_pool: Vec::new(),
-            remove_state_pool: Vec::new(),
-            close_state_pool: Vec::new()
+            close_state_pool: Vec::new(),
+            rename_state_pool: Vec::new(),
+            create_dir_state_pool: Vec::new(),
+            remove_state_pool: Vec::new()
         }
     }
     
@@ -244,9 +263,11 @@ impl StateManager {
             State::PRead(state) => self.pread_state_pool.push(state),
             State::PWrite(state) => self.pwrite_state_pool.push(state),
             State::PWriteAll(state) => self.pwrite_all_state_pool.push(state),
-            State::RemoveFile(state) => self.remove_state_pool.push(state),
-            State::RemoveDir(state) => self.remove_state_pool.push(state),
             State::Close(state) => self.close_state_pool.push(state),
+            State::Rename(state) => self.rename_state_pool.push(state),
+            State::CreateDir(state) => self.create_dir_state_pool.push(state),
+            State::RemoveFile(state) => self.remove_state_pool.push(state),
+            State::RemoveDir(state) => self.remove_state_pool.push(state)
         }
     }
     
@@ -440,8 +461,39 @@ impl StateManager {
     }
 
     #[inline(always)]
-    pub fn remove_file(&mut self, path: impl AsRef<Path>, coroutine: CoroutineImpl, result: *mut Result<(), Error>) -> State {
-        let path = path_to_c_string(path);
+    pub fn rename(&mut self, old_path: Box<dyn AsRef<Path>>, new_path: Box<dyn AsRef<Path>>, coroutine: CoroutineImpl, result: *mut Result<(), Error>) -> State {
+        let old_path = path_to_c_string(old_path.as_ref());
+        let new_path = path_to_c_string(new_path.as_ref());
+
+        match self.rename_state_pool.pop() {
+            Some(state) => unsafe {
+                state.write(RenameState { old_path, new_path, coroutine, result });
+                State::Rename(state)
+            }
+            None => {
+                State::Rename(Ptr::new(RenameState { old_path, new_path, coroutine, result }))
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub fn create_dir(&mut self, path: Box<dyn AsRef<Path>>, coroutine: CoroutineImpl, result: *mut Result<(), Error>) -> State {
+        let path = path_to_c_string(path.as_ref());
+
+        match self.create_dir_state_pool.pop() {
+            Some(state) => unsafe {
+                state.write(CreateDirState { path, coroutine, result });
+                State::CreateDir(state)
+            }
+            None => {
+                State::CreateDir(Ptr::new(CreateDirState { path, coroutine, result }))
+            }
+        }
+    }
+
+    #[inline(always)]
+    pub fn remove_file(&mut self, path: Box<dyn AsRef<Path>>, coroutine: CoroutineImpl, result: *mut Result<(), Error>) -> State {
+        let path = path_to_c_string(path.as_ref());
 
         match self.remove_state_pool.pop() {
             Some(state) => unsafe {
@@ -455,8 +507,8 @@ impl StateManager {
     }
 
     #[inline(always)]
-    pub fn remove_dir(&mut self, path: impl AsRef<Path>, coroutine: CoroutineImpl, result: *mut Result<(), Error>) -> State {
-        let path = path_to_c_string(path);
+    pub fn remove_dir(&mut self, path: Box<dyn AsRef<Path>>, coroutine: CoroutineImpl, result: *mut Result<(), Error>) -> State {
+        let path = path_to_c_string(path.as_ref());
 
         match self.remove_state_pool.pop() {
             Some(state) => unsafe {
@@ -552,6 +604,10 @@ impl Debug for State {
                 write!(f, "PWriteAll, fd: {:?}, offset: {}", state_ref.fd, state_ref.offset)
             }
             State::Close(state_ptr) => unsafe { write!(f, "Close, fd: {:?}", state_ptr.as_ref().fd) }
+            State::Rename(state_ptr) => unsafe { 
+                write!(f, "Rename, from: {:?}, to: {:?}", state_ptr.as_ref().old_path, state_ptr.as_ref().new_path) 
+            }
+            State::CreateDir(state_ptr) => unsafe { write!(f, "CreateDir, path: {:?}", state_ptr.as_ref().path) }
             State::RemoveFile(state_ptr) => unsafe { write!(f, "RemoveFile, path: {:?}", state_ptr.as_ref().path) }
             State::RemoveDir(state_ptr) => unsafe { write!(f, "RemoveDir, path: {:?}", state_ptr.as_ref().path) }
         }
